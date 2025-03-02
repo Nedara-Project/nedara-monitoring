@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ display_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/monitoring.css') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@7.2.3/dist/gridstack.min.css" />
+    <script src="{{ url_for('static', filename='js/lib/chartjs/chart.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/lib/jquery/jquery.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/lib/underscorejs/underscore.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/lib/nedarajs/nedara.js') }}" type="module"></script>
+    <script src="{{ url_for('static', filename='js/lib/gridstack/gridstack.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/monitoring.js') }}" type="module"></script>
+</head>
+<body>
+    <div id="loading-container">
+        <div class="wave-container">
+            <div class="wave"></div>
+            <div class="wave"></div>
+            <div class="wave"></div>
+        </div>
+        <p>Loading {{ display_name }}...</p>
+    </div>
+
+    <div class="grid-stack" id="monitoring" style="display: none;">
+        <div class="grid-stack-item" data-gs-x="0" data-gs-y="0" data-gs-width="2" data-gs-height="1">
+            <div class="grid-stack-item-content">
+                <div>
+                    <h1>{{ display_name }}</h1>
+                    <div>
+                        <div class="status-indicator status-healthy" id="overall-status"></div>
+                        <span id="status-text">All Systems Operational</span>
+                    </div>
+                </div>
+                <div>
+                    <div id="dashboard-time">
+                        Last updated: <span id="last-update-time"></span>
+                    </div>
+                    <br/>
+                    <select id="environment-selector">
+                        <option value="production">Production</option>
+                        <option value="staging">Staging</option>
+                    </select>
+                </div>
+                <br/>
+                <a href="{{ web_url }}" target="new" id="web-url" class="simple-link">{{ web_url }}</a>
+            </div>
+        </div>
+
+        <div class="grid-stack-item" data-gs-x="2" data-gs-y="0" data-gs-width="4" data-gs-height="3">
+            <div class="grid-stack-item-content" id="server-panel"></div>
+        </div>
+        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
+            <div class="grid-stack-item-content" id="chart-panel"></div>
+        </div>
+        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
+            <div class="grid-stack-item-content" id="chart-panel-lt"></div>
+        </div>
+        <div class="grid-stack-item" data-gs-x="6" data-gs-y="0" data-gs-width="6" data-gs-height="3">
+            <div class="grid-stack-item-content" id="postgres-panel"></div>
+        </div>
+    </div>
+</body>
+</html>

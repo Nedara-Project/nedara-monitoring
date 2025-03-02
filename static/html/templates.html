@@ -1,0 +1,130 @@
+<html>
+
+    <template id="server-panel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <div class="status-indicator" id="web-url-status"></div>
+                Web Application Status
+            </div>
+        </div>
+        <div class="grid grid-cols-1 gap-2">
+            <div class="metric-card">
+                <div class="metric-name">Status</div>
+                <div class="metric-value" id="web-url-status-text">Checking...</div>
+                <div class="metric-name">Response Time</div>
+                <div class="metric-value" id="web-url-response-time">N/A</div>
+            </div>
+        </div>
+        <br/>
+        <div id="linux-servers"></div>
+    </template>
+
+    <template id="linux-server">
+        <div class="panel-header">
+            <div class="panel-title">
+                <div class="status-indicator status-linux-server {{health_class}}" id="{{id}}"></div>{{name}}
+                {{#if logs}}<a href="#" class="simple-link open_logs" data-source="{{name}}">[View logs]</a>{{/if}}
+                <div class="logs_content" style="display:none;">{{logs}}</div>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 gap-2">
+            <div class="metric-card">
+                <div class="metric-name">CPU Usage</div>
+                <div class="metric-value">{{cpu_usage}}%</div>
+                <div class="progress-bar">
+                    <div class="progress-value {{cpu_usage_class}}" style="width: {{cpu_usage}}%;"></div>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">RAM Usage</div>
+                <div class="metric-value">{{ram_usage_percent}}%</div>
+                <div class="metric-info">{{ram_used}} / {{ram_total}} MB → {{ram_available}} MB</div>
+                <div class="progress-bar">
+                    <div class="progress-value {{ram_usage_class}}" style="width: {{ram_usage_percent}}%;"></div>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-name">Storage</div>
+                <div class="metric-value">{{storage_usage_percent}}%</div>
+                <div class="metric-info">{{storage_used}} / {{storage_size}} → {{storage_available}}</div>
+                <div class="progress-bar">
+                    <div class="progress-value {{storage_usage_class}}" style="width: {{storage_usage_percent}}%;"></div>
+                </div>
+            </div>
+        </div>
+        <br/>
+    </template>
+
+    <template id="chart-panel">
+        <div class="panel-header">
+            <div class="panel-title">System Performance</div>
+        </div>
+        <div class="chart-container">
+            <canvas id="performanceChart"></canvas>
+        </div>
+    </template>
+
+    <template id="chart-panel-lt">
+        <div class="panel-header">
+            <div class="panel-title">System Performance (Long term)</div>
+        </div>
+        <div class="chart-container">
+            <canvas id="performanceChart24h"></canvas>
+        </div>
+    </template>
+
+    <template id="postgres-panel">
+        <div class="panel-header">
+            <div class="panel-title"><div class="status-indicator status-healthy" id="postgres-status"></div>PostgreSQL</div>
+        </div>
+            <div>
+                <div class="text-sm">Statistics for database: <span id="main-db"></span></div>
+                <div class="text-sm">Active Queries: <span id="query-count"></span></div>
+                <div class="text-sm">Database Size (uncompressed): <span id="postgres-db-size"></span></div>
+                <div class="text-sm">Avg Wait Time (Active): <span id="avg-wait-time-active"></span></div>
+                <div class="text-sm">Avg Wait Time (Idle): <span id="avg-wait-time-idle"></span></div>
+            </div>
+            <div>
+                <button id="filter-active">
+                    Show Active
+                </button>
+                <button id="filter-idle">
+                    Show Idle
+                </button>
+                <button id="filter-all">
+                    Show All
+                </button>
+                <select id="database-selector" class="filter-select">
+                    <option value="all">All Databases</option>
+                </select>
+            </div>
+            <table class="data-table" id="postgres-queries" style="table-layout: fixed;">
+                <thead>
+                    <tr>
+                        <th>Info</th>
+                        <th>State</th>
+                        <th>Wait Event</th>
+                        <th>Wait Time</th>
+                        <th style="width: 60%;">Query</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </template>
+
+    <template id="modal-logs">
+        <div class="modal-overlay active" id="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title"></h2>
+                    <button class="modal-close" id="close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="log-container" data-log-source="{{source}}" id="logs">{{logs}}</div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+</html>
