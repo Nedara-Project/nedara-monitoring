@@ -1,6 +1,7 @@
 "use strict";
 
 import Nedara from "../js/lib/nedarajs/nedara.min.js";
+import MonitoringDB from "./db.js";
 
 const TEMPLATES = "/static/html/templates.html";
 
@@ -28,7 +29,8 @@ const Monitoring = Nedara.createWidget({
             throw new Error(`HTTP error! Status: ${response.status}`);
         }
         const chartsData = await response.json();
-        this.render();
+        this.env = chartsData.current_env;
+        this.db = new MonitoringDB();
         this.psqlQueriesFilter = 'all';
         this.dbFilter = 'all';
         this.availableDatabases = [];
@@ -42,23 +44,44 @@ const Monitoring = Nedara.createWidget({
                 maxPoints: chartsData.chart_history_long,
             },
         ];
-        _.each(this.charts, function (chart) {
-            self.chartsInfo = [];
-            _.each(chartsData.chart_info, function (chartInfo) {
-                self.chartsInfo.push({
+        this.render();
+        // Load saved chart data
+        const savedChartData = await this.db.getChartData(this.env);
+        this.chartsInfoMap = {};
+        const savedDataMap = {};
+        if (savedChartData) {
+            savedChartData.forEach(item => {
+                if (!savedDataMap[item.chart_id]) {
+                    savedDataMap[item.chart_id] = {
+                        labels: item.labels,
+                        datasets: {},
+                    };
+                }
+                savedDataMap[item.chart_id].datasets[item.name] = item.datasets.data;
+            });
+        }
+        _.each(this.charts, (chart) => {
+            this.chartsInfoMap[chart.id] = [];
+            _.each(chartsData.chart_info, (chartInfo) => {
+                const savedDatasetData = savedDataMap[chart.id]?.datasets[chartInfo.label] || Array(chart.maxPoints).fill(null);
+                const dataset = {
                     name: chartInfo.name,
                     label: chartInfo.label,
-                    data: Array(chart.maxPoints).fill(null),
+                    data: savedDatasetData,
                     borderColor: chartInfo.borderColor,
                     backgroundColor: chartInfo.backgroundColor,
                     borderWidth: chartInfo.borderWidth,
                     tension: chartInfo.tension,
                     fill: chartInfo.fill,
-                });
+                };
+                this.chartsInfoMap[chart.id].push(dataset);
             });
-            self[chart.id] = new Chart(
-                document.getElementById(chart.id).getContext("2d"), self.chartConfig(
-                    Array(chart.maxDataPoints).fill(""), self.chartsInfo,
+            const labelsToUse = savedDataMap[chart.id]?.labels || Array(chart.maxPoints).fill("");
+            this[chart.id] = new Chart(
+                document.getElementById(chart.id).getContext("2d"),
+                self.chartConfig(
+                    labelsToUse,
+                    this.chartsInfoMap[chart.id],
                 ),
             );
         });
@@ -83,6 +106,37 @@ const Monitoring = Nedara.createWidget({
             removable: false,
             acceptWidgets: false,
         });
+    },
+    loadChartsFromDB: async function () {
+        try {
+            const savedChartData = await this.db.getChartData(this.env);
+            if (savedChartData && savedChartData.length > 0) {
+                // Iterate through each saved chart data
+                _.each(savedChartData, (chartData) => {
+                    const chartInstance = this[chartData.chart_id];
+                    if (chartInstance) {
+                        // Find the corresponding dataset in the chart
+                        const dataset = _.findWhere(chartInstance.data.datasets, {label: chartData.name});
+                        if (dataset) {
+                            // Restore saved data
+                            dataset.data = chartData.datasets.data;
+                            // Update labels if they exist
+                            if (chartData.labels && chartData.labels.length > 0) {
+                                chartInstance.data.labels = chartData.labels;
+                            }
+                        }
+                    }
+                });
+                // Update all charts with restored data
+                _.each(this.charts, (chart) => {
+                    if (this[chart.id]) {
+                        this[chart.id].update();
+                    }
+                });
+            }
+        } catch (error) {
+            console.error("Error loading chart data from IndexedDB:", error);
+        }
     },
     getStatusClass: function (value) {
         return value < 70 ? "usage-low" : value < 90 ? "usage-medium" : "usage-high";
@@ -328,6 +382,28 @@ const Monitoring = Nedara.createWidget({
                     chartInstance.update();
                 };
             });
+            // Update IndexedDB
+            try {
+                const chartDataToStore = [];
+                _.each(widget.charts, function (chartConf) {
+                    const chartInstance = widget[chartConf.id];
+                    if (chartInstance) {
+                        _.each(chartInstance.data.datasets, function (dataset) {
+                            chartDataToStore.push({
+                                chart_id: chartConf.id,
+                                name: dataset.label,
+                                datasets: {
+                                    data: dataset.data,
+                                },
+                                labels: chartInstance.data.labels,
+                            });
+                        });
+                    }
+                });
+                await widget.db.saveChartData(widget.env, chartDataToStore);
+            } catch (err) {
+                console.error("Error saving chart data to DB:", err);
+            }
             // Update overall status
             const timestamp = new Date();
             document.getElementById("last-update-time").textContent = widget.formatTime(timestamp);

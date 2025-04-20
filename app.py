@@ -46,6 +46,7 @@ def get_widget_config():
     env_config = get_environment_config(CURRENT_ENVIRONMENT)
     general_config = config['general']
     data = {
+        'current_env': CURRENT_ENVIRONMENT,
         'refresh_rate': general_config['refresh_rate'],
         'chart_history_short': general_config['chart_history_short'],
         'chart_history_long': general_config['chart_history_long'],

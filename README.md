@@ -31,6 +31,7 @@ Nedara Monitoring is an open-source web application that provides real-time moni
 - **Status indicators** for quick system health assessment
 - **Responsive dashboard** with draggable and resizable widgets
 - **Performance charts** with short-term and long-term history
+- **Using indexedDB** to save chart data
 
 ## Installation
 
