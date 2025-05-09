@@ -40,8 +40,9 @@
                     </div>
                     <br/>
                     <select id="environment-selector">
-                        <option value="production">Production</option>
-                        <option value="staging">Staging</option>
+                        {% for env in environments %}
+                        <option value="{{ env }}">{{ env }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <br/>

@@ -193,7 +193,14 @@ def get_server_stats(server_config):
 def index():
     """Render the dashboard with statistics for the current environment."""
     env_config = get_environment_config(CURRENT_ENVIRONMENT)
-    return render_template('main.html', display_name=config['general']['display_name'], web_url=env_config.get('url'))
+    raw_envs = config['environments'].get('available_env', '').strip()
+    environments = [env.strip() for env in raw_envs.split(',') if env.strip()]
+    return render_template(
+        'main.html',
+        display_name=config['general'].get('display_name'),
+        web_url=env_config.get('url'),
+        environments=environments,
+    )
 
 
 @app.route('/api/stats')
