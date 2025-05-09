@@ -99,12 +99,24 @@ const Monitoring = Nedara.createWidget({
         this.$selector.find('#chart-panel').html(Nedara.renderTemplate('chart-panel'));
         this.$selector.find('#chart-panel-lt').html(Nedara.renderTemplate('chart-panel-lt'));
         this.$selector.find('#postgres-panel').html(Nedara.renderTemplate('postgres-panel'));
-        GridStack.init({
+        this.grid = GridStack.init({
             column: 12,
             cellHeight: 100,
             float: true,
             removable: false,
             acceptWidgets: false,
+        });
+        // Load saved state
+        const savedLayout = localStorage.getItem("grid-layout");
+        if (savedLayout) {
+            this.grid.removeAll();
+            const layout = JSON.parse(savedLayout);
+            this.grid.load(layout);
+        }
+        // Save state on change
+        this.grid.on('change', (event, items) => {
+            const layout = this.grid.save();
+            localStorage.setItem("grid-layout", JSON.stringify(layout));
         });
     },
     loadChartsFromDB: async function () {
