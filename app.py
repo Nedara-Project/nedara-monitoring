@@ -132,7 +132,7 @@ def get_postgres_stats(postgres_config):
             'main_db': main_db,
         }
     except Exception as e:
-        return {'error': str(e)}
+        return {'error': str(e), 'server': 'postgres'}
 
 
 def get_server_stats(server_config):
@@ -186,7 +186,7 @@ def get_server_stats(server_config):
             'chart_label': server_config['chart_label'],
         }
     except Exception as e:
-        return {'error': str(e)}
+        return {'error': str(e), 'server': server_config['name']}
 
 
 @app.route('/')

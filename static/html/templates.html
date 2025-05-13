@@ -22,7 +22,7 @@
     <template id="linux-server">
         <div class="panel-header">
             <div class="panel-title">
-                <div class="status-indicator status-linux-server {{health_class}}" id="{{id}}"></div>{{name}}
+                <div class="status-indicator status-linux-server {{health_class}}" id="{{id}}" data-name="{{name}}"></div>{{name}}
                 {{#if logs}}<a href="#" class="simple-link open_logs" data-source="{{name}}">[View logs]</a>{{/if}}
                 <div class="logs_content" style="display:none;">{{logs}}</div>
             </div>
@@ -75,7 +75,7 @@
 
     <template id="postgres-panel">
         <div class="panel-header">
-            <div class="panel-title"><div class="status-indicator status-healthy" id="postgres-status"></div>PostgreSQL</div>
+            <div class="panel-title"><div class="status-indicator status-healthy" id="postgres-status" data-name="postgres"></div>PostgreSQL</div>
         </div>
             <div class="stats-grid">
                 <div class="text-sm">Statistics for database: <span id="main-db"></span></div>

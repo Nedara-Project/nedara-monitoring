@@ -318,6 +318,12 @@ const Monitoring = Nedara.createWidget({
             $linuxServers.empty();
             const allDatabases = new Set();
             _.each(data, function (server, idx) {
+                if (server.error) {
+                    widget.$container
+                        .find(".status-indicator[data-name='%s']".replace('%s', server.server))
+                        .addClass('status-critical')
+                        .removeClass('status-healthy');
+                }
                 switch (server.type) {
                     case 'linux':
                         $linuxServers.prepend(Nedara.renderTemplate('linux-server',
@@ -427,13 +433,13 @@ const Monitoring = Nedara.createWidget({
         } catch (error) {
             console.error("Refreshing data failed:", error);
             // Set all status indicators to critical
-            $(".status-linux-server").attr("class", "status-indicator status-critical");
-            $("#postgres-status").attr("class", "status-indicator status-critical");
-            $("#web-url-status").attr("class", "status-indicator status-critical");
-            $("#overall-status").attr("class", "status-indicator status-critical");
+            widget.$container.find(".status-linux-server").attr("class", "status-indicator status-critical");
+            widget.$container.find("#postgres-status").attr("class", "status-indicator status-critical");
+            widget.$container.find("#web-url-status").attr("class", "status-indicator status-critical");
+            widget.$container.find("#overall-status").attr("class", "status-indicator status-critical");
             // Display error message
-            $("#status-text").text("Connection Error - Unable to refresh data");
-            $("#last-update-time").text("N/A");
+            widget.$container.find("#status-text").text("Connection Error - Unable to refresh data");
+            widget.$container.find("#last-update-time").text("N/A");
             // Optionally stop further automatic refreshes
             clearInterval(5000);
         }
