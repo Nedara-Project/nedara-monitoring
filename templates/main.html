@@ -28,7 +28,12 @@
         <div class="grid-stack-item" data-gs-x="0" data-gs-y="0" data-gs-width="2" data-gs-height="1">
             <div class="grid-stack-item-content">
                 <div>
-                    <h1>{{ display_name }}</h1>
+                    <div>
+                        <a href="https://github.com/nedara-project" target="_blank" class="nedara-link">
+                            Powered by Nedara Project
+                        </a>
+                    </div>
+                    <h2>{{ display_name }}</h2>
                     <div>
                         <div class="status-indicator status-healthy" id="overall-status"></div>
                         <span id="status-text">All Systems Operational</span>
@@ -39,14 +44,17 @@
                         Last updated: <span id="last-update-time"></span>
                     </div>
                     <br/>
-                    <select id="environment-selector">
-                        {% for env in environments %}
-                        <option value="{{ env }}">{{ env }}</option>
-                        {% endfor %}
-                    </select>
+                    <div class="select-container">
+                        <select id="environment-selector">
+                            {% for env in environments %}
+                            <option value="{{ env }}">{{ env }}</option>
+                            {% endfor %}
+                        </select>
+                        <span class="custom-arrow">▼</span>
+                    </div>
                 </div>
                 <br/>
-                <a href="{{ web_url }}" target="new" id="web-url" class="simple-link">{{ web_url }}</a>
+                <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">{{ web_url }}</a>
             </div>
         </div>
 

@@ -366,7 +366,7 @@ const Monitoring = Nedara.createWidget({
                                 <td>${query[2]}</td> <!-- State -->
                                 <td>${query[5] || "N/A"}</td> <!-- Wait Event -->
                                 <td>${query[6] && query[6] >= 0 ? `${parseFloat(query[6]).toFixed(2)}s` : "0.00s"}</td> <!-- Wait Time -->
-                                <td class="truncate" style="width: 60%;" title="${query[3]}">${query[3]}</td> <!-- Query -->
+                                <td class="truncate" style="width: 97%;" title="${query[3]}">${query[3]}</td> <!-- Query -->
                             </tr>
                         `).join("");
                         break;

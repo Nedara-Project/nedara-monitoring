@@ -77,7 +77,7 @@
         <div class="panel-header">
             <div class="panel-title"><div class="status-indicator status-healthy" id="postgres-status"></div>PostgreSQL</div>
         </div>
-            <div>
+            <div class="stats-grid">
                 <div class="text-sm">Statistics for database: <span id="main-db"></span></div>
                 <div class="text-sm">Active Queries: <span id="query-count"></span></div>
                 <div class="text-sm">Database Size (uncompressed): <span id="postgres-db-size"></span></div>
@@ -98,7 +98,7 @@
                     <option value="all">All Databases</option>
                 </select>
             </div>
-            <table class="data-table" id="postgres-queries" style="table-layout: fixed;">
+            <table class="data-table" id="postgres-queries">
                 <thead>
                     <tr>
                         <th>Info</th>
@@ -117,7 +117,7 @@
         <div class="modal-overlay active" id="modal-overlay">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h2 class="modal-title"></h2>
+                    <span class="modal-title">Logs</span>
                     <button class="modal-close" id="close-modal">&times;</button>
                 </div>
                 <div class="modal-body">
