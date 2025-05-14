@@ -87,7 +87,7 @@ const Monitoring = Nedara.createWidget({
         });
         this.filterQueriesByState("all");
         this.refreshData();
-        setInterval(this.refreshData, 5000);
+        setInterval(this.refreshData, chartsData.refresh_rate);
     },
 
     // ************************************************************
@@ -169,15 +169,26 @@ const Monitoring = Nedara.createWidget({
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: {duration: 300},
+                animation: {duration: 0},
+                spanGaps: true,
+                showLine: false,
+                borderWidth: 1,
+                tension: 0.1,
+                fill: true,
+                pointRadius: 1,
                 plugins: {
                     legend: {position: "top", labels: {color: "#e5e7eb"}},
-                    tooltip: {mode: "index", intersect: false},
+                    tooltip: {enabled: false},
                 },
                 scales: {
-                    x: {grid: {color: "rgba(75, 85, 99, 0.2)"}, ticks: {color: "#9ca3af"}},
+                    x: {
+                        grid: {color: "rgba(75, 85, 99, 0.2)"},
+                        ticks: {color: "#9ca3af"},
+                    },
                     y: {
+                        type: "linear",
                         beginAtZero: true,
+                        min: 0,
                         max: 100,
                         grid: {color: "rgba(75, 85, 99, 0.2)"},
                         ticks: {color: "#9ca3af", callback: (value) => `${value}%`},
@@ -425,8 +436,8 @@ const Monitoring = Nedara.createWidget({
             // Update overall status
             const timestamp = new Date();
             document.getElementById("last-update-time").textContent = widget.formatTime(timestamp);
-            widget.applyFilters();
             widget.highlightCriticalQueries();
+            widget.applyFilters();
             widget.updateOverallStatus();
             widget.refreshEnvironment();
             await widget.checkWebUrlStatus();
@@ -440,8 +451,6 @@ const Monitoring = Nedara.createWidget({
             // Display error message
             widget.$container.find("#status-text").text("Connection Error - Unable to refresh data");
             widget.$container.find("#last-update-time").text("N/A");
-            // Optionally stop further automatic refreshes
-            clearInterval(5000);
         }
         widget.$container.find('#loading-container').remove();
         widget.$container.find('#monitoring').show();

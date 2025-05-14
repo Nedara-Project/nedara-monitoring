@@ -60,9 +60,6 @@ def get_widget_config():
                 'label': server_config['chart_label'],
                 'borderColor': server_config['chart_color'],
                 'backgroundColor': 'rgba(59, 130, 246, 0.1)',
-                'borderWidth': 2,
-                'tension': 0.3,
-                'fill': True,
             }
     return jsonify(data)
 
