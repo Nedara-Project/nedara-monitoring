@@ -171,9 +171,9 @@ const Monitoring = Nedara.createWidget({
                 maintainAspectRatio: false,
                 animation: {duration: 0},
                 spanGaps: true,
-                showLine: false,
-                borderWidth: 1,
-                tension: 0.1,
+                showLine: true,
+                borderWidth: 1.5,
+                tension: 0.3,
                 fill: true,
                 pointRadius: 1,
                 plugins: {
