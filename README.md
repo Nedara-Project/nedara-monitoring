@@ -127,7 +127,7 @@ Nedara Monitoring uses a modular configuration file (`config.ini`) that allows y
 ```ini
 [general]
 display_name = Your Monitoring Dashboard
-refresh_rate = 1  # Refresh rate
+refresh_rate = 1
 chart_history = 20  # Number of data points for short-term chart
 chart_history_alt = 20000  # Number of data points for long-term chart
 
@@ -182,9 +182,10 @@ You can download the latest version of Nedara Monitoring from:
 Nedara Monitoring uses several libraries:
 
 - Flask for the web application framework
+    - Flask-SocketIO for WebSockets integration
 - psycopg2 for PostgreSQL connections
 - paramiko for SSH connections to Linux servers
-- Chart.js for interactive charts
+- Lightweight Charts (by TradingView) for interactive charts
 - GridStack for the dashboard layout
 - nedarajs (included as a submodule) for UI components
 
