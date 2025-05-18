@@ -2,12 +2,14 @@
 ; The configuration is modular. What is mandatory is : general and environments.
 ; You can set any server env name that you want.
 ; Servers must be `linux` or `postgres` type.
+; Important: Pay attention having correct access rights on files you mention (cfr. SSH user being used).
 
 [general]
 display_name =
-refresh_rate = 5000
-chart_history_short = 20
-chart_history_long = 20000
+refresh_rate = 1
+chart_history = 20
+chart_history_alt = 20000
+debug = False
 
 [environments]
 available_env = env1, env2
@@ -28,6 +30,7 @@ host =
 user =
 password =
 log_file =
+nginx_access_file =
 chart_label =
 chart_color = #3b82f6
 
@@ -56,6 +59,7 @@ host =
 user =
 password =
 log_file =
+nginx_access_file =
 chart_label =
 chart_color = #3b82f6
 

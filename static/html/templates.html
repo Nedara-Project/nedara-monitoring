@@ -55,21 +55,57 @@
         <br/>
     </template>
 
-    <template id="chart-panel">
+    <template id="chart-panel-cpu">
         <div class="panel-header">
-            <div class="panel-title">System Performance</div>
+            <div class="panel-title">CPU Usage %</div>
         </div>
         <div class="chart-container">
-            <canvas id="performanceChart"></canvas>
+            <div id="CPUChart" style="width: 100%; height: 100%;"></div>
         </div>
     </template>
 
-    <template id="chart-panel-lt">
+    <template id="chart-panel-cpu-alt">
         <div class="panel-header">
-            <div class="panel-title">System Performance (Long term)</div>
+            <div class="panel-title">CPU Usage % (Alt)</div>
         </div>
         <div class="chart-container">
-            <canvas id="performanceChart24h"></canvas>
+            <div id="CPUChartAlt" style="width: 100%; height: 100%;"></div>
+        </div>
+    </template>
+
+    <template id="chart-panel-http">
+        <div class="panel-header">
+            <div class="panel-title">HTTP Requests</div>
+        </div>
+        <div class="chart-container">
+            <div id="httpRequestsChart" style="width: 100%; height: 100%;"></div>
+        </div>
+    </template>
+
+    <template id="chart-panel-http-alt">
+        <div class="panel-header">
+            <div class="panel-title">HTTP Requests (Alt)</div>
+        </div>
+        <div class="chart-container">
+            <div id="httpRequestsChartAlt" style="width: 100%; height: 100%;"></div>
+        </div>
+    </template>
+
+    <template id="chart-panel-ram">
+        <div class="panel-header">
+            <div class="panel-title">RAM Usage %</div>
+        </div>
+        <div class="chart-container">
+            <div id="RAMChart" style="width: 100%; height: 100%;"></div>
+        </div>
+    </template>
+
+    <template id="chart-panel-ram-alt">
+        <div class="panel-header">
+            <div class="panel-title">RAM Usage % (Alt)</div>
+        </div>
+        <div class="chart-container">
+            <div id="RAMChartAlt" style="width: 100%; height: 100%;"></div>
         </div>
     </template>
 
