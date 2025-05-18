@@ -127,7 +127,7 @@ Nedara Monitoring uses a modular configuration file (`config.ini`) that allows y
 ```ini
 [general]
 display_name = Your Monitoring Dashboard
-refresh_rate = 5000  # Refresh rate in milliseconds
+refresh_rate = 1  # Refresh rate
 chart_history = 20  # Number of data points for short-term chart
 chart_history_alt = 20000  # Number of data points for long-term chart
 
