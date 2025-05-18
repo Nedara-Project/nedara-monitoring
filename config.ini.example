@@ -10,6 +10,7 @@ refresh_rate = 1
 chart_history = 20
 chart_history_alt = 20000
 debug = False
+secret_key = your-secret-app-key
 
 [environments]
 available_env = env1, env2

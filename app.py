@@ -26,16 +26,16 @@ class CustomJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-app = Flask(__name__)
-app.json_encoder = CustomJSONEncoder
-app.config['SECRET_KEY'] = 'your-secret-key'
-socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
-
 # Configuration
 config = configparser.ConfigParser()
 config.read('config.ini')
 CURRENT_ENVIRONMENT = config['environments']['default_env']
 REFRESH_RATE = int(config['general']['refresh_rate'])
+
+app = Flask(__name__)
+app.json_encoder = CustomJSONEncoder
+app.config['SECRET_KEY'] = config['general']['secret_key']
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 
 # SQLite Configuration
 DATABASE = 'nedara_monitoring.db'

@@ -130,6 +130,8 @@ display_name = Your Monitoring Dashboard
 refresh_rate = 1
 chart_history = 20  # Number of data points for short-term chart
 chart_history_alt = 20000  # Number of data points for long-term chart
+debug = False
+secret_key = your-secret-app-key
 
 [environments]
 available_env = staging, production
