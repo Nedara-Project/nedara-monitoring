@@ -254,13 +254,8 @@ def get_server_stats(server_config):
 
         http_requests = '0'
         if server_config.get('nginx_access_file'):
-            stdin, stdout, stderr = ssh.exec_command(f"""
-                start_time=$(date -u -d "{REFRESH_RATE} seconds ago" +'%d/%b/%Y:%H:%M:%S')
-                end_time=$(date -u +'%d/%b/%Y:%H:%M:%S')
-                awk -v start="$start_time" -v end="$end_time" \
-                'match($0, /\[(.*)\]/, m) && m[1] >= start && m[1] <= end' \
-                {server_config.get('nginx_access_file')} | wc -l
-            """)
+            cmd = """grep -E "\\[$(date -u -d '%d seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')|\\[$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')" %s | awk -v start="$(date -u -d '%d seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')" -v end="$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')" 'BEGIN { count=0 } { gsub(/^\\[/, "", $4); split($4, dt, /[/:]/); ts = dt[1]"/"dt[2]"/"dt[3]":"dt[4]":"dt[5]":"dt[6]; if (ts >= start && ts <= end) count++ } END { print count }'""" % (REFRESH_RATE, server_config["nginx_access_file"], REFRESH_RATE)
+            stdin, stdout, stderr = ssh.exec_command(cmd)
             http_requests = stdout.read().decode().strip().split()
 
         ssh.close()
