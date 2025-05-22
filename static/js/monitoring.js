@@ -28,6 +28,7 @@ const Monitoring = Nedara.createWidget({
         this.render();
         this.setupSocketListeners();
         this.loadChartConfigs();
+        this.autoReload();
     },
 
     // ************************************************************
@@ -517,6 +518,12 @@ const Monitoring = Nedara.createWidget({
                 row.style.display = "none";
             }
         });
+    },
+
+    autoReload: function () {
+        // This function refreshes the interface every 24 hours to reduce the load
+        // when displaying many points on less powerful machines.
+        setInterval(() => location.reload(), 24 * 60 * 60 * 1000);
     },
 
     // ************************************************************
