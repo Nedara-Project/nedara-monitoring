@@ -26,61 +26,117 @@
     </div>
 
     <div class="grid-stack" id="monitoring" style="display: none;">
-        <div class="grid-stack-item" data-gs-x="0" data-gs-y="0" data-gs-width="2" data-gs-height="1">
+        <div class="grid-stack-item"
+             gs-x="0"
+             gs-y="0"
+             gs-w="2"
+             gs-h="13"
+             gs-no-resize="false"
+             gs-no-move="false">
             <div class="grid-stack-item-content">
-                <div>
+                <div class="header-content">
                     <div>
                         <a href="https://github.com/nedara-project" target="_blank" class="nedara-link">
                             Powered by Nedara Project
                         </a>
                     </div>
                     <h2>{{ display_name }}</h2>
-                    <div>
+                    <div class="status-container">
                         <div class="status-indicator status-healthy" id="overall-status"></div>
                         <span id="status-text">All Systems Operational</span>
                     </div>
-                </div>
-                <div>
-                    <div id="dashboard-time">
-                        Last updated: <span id="last-update-time"></span>
+                    <div class="update-container">
+                        <div id="dashboard-time">
+                            Last updated: <span id="last-update-time"></span>
+                        </div>
+                        <br/>
+                        <div class="select-container">
+                            <select id="environment-selector">
+                                {% for env in environments %}
+                                <option value="{{ env }}">{{ env }}</option>
+                                {% endfor %}
+                            </select>
+                            <span class="custom-arrow">▼</span>
+                        </div>
                     </div>
-                    <br/>
-                    <div class="select-container">
-                        <select id="environment-selector">
-                            {% for env in environments %}
-                            <option value="{{ env }}">{{ env }}</option>
-                            {% endfor %}
-                        </select>
-                        <span class="custom-arrow">▼</span>
-                    </div>
+                    <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">{{ web_url }}</a>
                 </div>
-                <br/>
-                <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">{{ web_url }}</a>
             </div>
         </div>
 
-        <div class="grid-stack-item" data-gs-x="2" data-gs-y="0" data-gs-width="4" data-gs-height="3">
+        <div class="grid-stack-item"
+             gs-x="2"
+             gs-y="0"
+             gs-w="2"
+             gs-h="13"
+             gs-no-resize="false"
+             gs-no-move="false">
             <div class="grid-stack-item-content" id="server-panel"></div>
         </div>
-        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
+
+        <div class="grid-stack-item chart-panel"
+             gs-x="4"
+             gs-y="0"
+             gs-w="3"
+             gs-h="3"
+             gs-no-resize="false"
+             gs-no-move="false">
             <div class="grid-stack-item-content" id="chart-panel-cpu"></div>
         </div>
-        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
-            <div class="grid-stack-item-content" id="chart-panel-cpu-alt"></div>
-        </div>
-        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
+        <div class="grid-stack-item chart-panel"
+             gs-x="7"
+             gs-y="0"
+             gs-w="3"
+             gs-h="3"
+             gs-no-resize="false"
+             gs-no-move="false">
             <div class="grid-stack-item-content" id="chart-panel-http"></div>
         </div>
-        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
-            <div class="grid-stack-item-content" id="chart-panel-http-alt"></div>
-        </div>
-        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
+        <div class="grid-stack-item chart-panel"
+             gs-x="10"
+             gs-y="0"
+             gs-w="2"
+             gs-h="3"
+             gs-no-resize="false"
+             gs-no-move="false">
             <div class="grid-stack-item-content" id="chart-panel-ram"></div>
         </div>
-        <div class="grid-stack-item" data-gs-x="0" data-gs-y="1" data-gs-width="6" data-gs-height="4">
+
+        <div class="grid-stack-item chart-panel"
+             gs-x="4"
+             gs-y="3"
+             gs-w="3"
+             gs-h="4"
+             gs-no-resize="false"
+             gs-no-move="false">
+            <div class="grid-stack-item-content" id="chart-panel-cpu-alt"></div>
+        </div>
+        <div class="grid-stack-item chart-panel"
+             gs-x="7"
+             gs-y="3"
+             gs-w="3"
+             gs-h="4"
+             gs-no-resize="false"
+             gs-no-move="false">
+            <div class="grid-stack-item-content" id="chart-panel-http-alt"></div>
+        </div>
+        <div class="grid-stack-item chart-panel"
+             gs-x="10"
+             gs-y="3"
+             gs-w="2"
+             gs-h="4"
+             gs-no-resize="false"
+             gs-no-move="false">
             <div class="grid-stack-item-content" id="chart-panel-ram-alt"></div>
         </div>
-        <div class="grid-stack-item" data-gs-x="6" data-gs-y="0" data-gs-width="6" data-gs-height="3">
+
+        <div class="grid-stack-item"
+             gs-x="4"
+             gs-y="7"
+             gs-w="8"
+             gs-h="6"
+             gs-no-resize="false"
+             gs-no-move="false">
             <div class="grid-stack-item-content" id="postgres-panel"></div>
         </div>
     </div>

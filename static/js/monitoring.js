@@ -115,6 +115,9 @@ const Monitoring = Nedara.createWidget({
             float: true,
             removable: false,
             acceptWidgets: false,
+            resizable: {
+                handles: 'e, se, s, sw, w',
+            },
         });
 
         const savedLayout = localStorage.getItem("grid-layout");
@@ -128,6 +131,8 @@ const Monitoring = Nedara.createWidget({
             const layout = this.grid.save();
             localStorage.setItem("grid-layout", JSON.stringify(layout));
         });
+
+        this.setupChartHoverEvents();
     },
 
     handleServerDataUpdate: function (data) {
@@ -302,10 +307,31 @@ const Monitoring = Nedara.createWidget({
         this.updateDatabaseSelector([...allDatabases].sort());
 
         _.each(this.charts, (chartConf) => {
+            this[chartConf.id].isScrolling = false;
+            if (this[chartConf.id]) {
+                this[chartConf.id].timeScale().subscribeVisibleLogicalRangeChange((newRange) => {
+                    this[chartConf.id].isScrolling = newRange !== null;
+                    if (!this[chartConf.id].isScrolling) {
+                        _.each(this.chartsInfoMap[chartConf.id], (seriesInfo) => {
+                            const seriesData = this.seriesData[chartConf.id][seriesInfo.name];
+                            seriesInfo.series.setData(seriesData.slice(-chartConf.maxPoints));
+                        });
+                        this[chartConf.id].timeScale().fitContent();
+                    }
+                });
+            }
+        });
+
+        _.each(this.charts, (chartConf) => {
             const chartInstance = this[chartConf.id];
             if (chartInstance) {
                 const now = new Date();
                 const timestamp = Math.floor(now.getTime() / 1000);
+                const container = document.getElementById(chartConf.container);
+                this[chartConf.id].resize(
+                    container.clientWidth,
+                    container.clientHeight,
+                );
 
                 _.each(this.chartsInfoMap[chartConf.id], (seriesInfo) => {
                     let dataType = '';
@@ -318,26 +344,30 @@ const Monitoring = Nedara.createWidget({
                     }
 
                     const value = chartDataMap[seriesInfo.label][dataType] || 0;
-                    const seriesData = this.seriesData[chartConf.id][seriesInfo.name];
+                    const seriesData = this.seriesData[chartConf.id][seriesInfo.label];
 
-                    seriesData.push({
-                        time: timestamp,
-                        value: value,
-                    });
-
-                    if (seriesData.length > parseInt(chartConf.maxPoints)) {
-                        const keepData = this.seriesData[chartConf.id][seriesInfo.name].slice(-(chartConf.maxPoints - 1));
-                        seriesInfo.series.setData(keepData);
-                    } else {
-                        seriesInfo.series.update({
+                    if (seriesData) {
+                        seriesData.push({
                             time: timestamp,
                             value: value,
                         });
+                        if (!this[chartConf.id].isScrolling) {
+                            if (seriesData.length > parseInt(chartConf.maxPoints)) {
+                                const keepData = seriesData.slice(-chartConf.maxPoints);
+                                seriesInfo.series.setData(keepData);
+                            } else {
+                                seriesInfo.series.update({
+                                    time: timestamp,
+                                    value: value,
+                                });
+                            }
+                        }
                     }
-
                 });
 
-                chartInstance.timeScale().fitContent();
+                if (!this[chartConf.id].isScrolling) {
+                    chartInstance.timeScale().fitContent();
+                }
             }
         });
 
@@ -353,8 +383,9 @@ const Monitoring = Nedara.createWidget({
 
     createLightweightChart: function (container) {
         const {createChart} = window.LightweightCharts;
+        const chartContainer = document.getElementById(container);
 
-        return createChart(document.getElementById(container), {
+        const chart = createChart(chartContainer, {
             layout: {
                 background: {type: 'solid', color: '#1f2937'},
                 textColor: '#e5e7eb',
@@ -376,9 +407,9 @@ const Monitoring = Nedara.createWidget({
                 borderColor: 'rgba(75, 85, 99, 0.5)',
                 timeVisible: true,
                 secondsVisible: true,
-                fixLeftEdge: true,
+                fixLeftEdge: true, // TODO: create editable config => ini
                 fixRightEdge: true,
-                lockVisibleTimeRangeOnResize: true,
+                lockVisibleTimeRangeOnResize: false,
             },
             crosshair: {
                 vertLine: {
@@ -403,6 +434,68 @@ const Monitoring = Nedara.createWidget({
             },
             handleScroll: true,
         });
+
+        const self = this;
+        const interactiveElements = chartContainer.querySelectorAll('canvas, .tv-lightweight-charts');
+        interactiveElements.forEach(el => {
+            el.addEventListener('mouseenter', () => {
+                const gridItem = chartContainer.closest('.grid-stack-item');
+                if (gridItem && self.grid) {
+                    self.grid.enableMove(gridItem, false);
+                }
+            });
+
+            el.addEventListener('mouseleave', () => {
+                const gridItem = chartContainer.closest('.grid-stack-item');
+                if (gridItem && self.grid) {
+                    self.grid.enableMove(gridItem, true);
+                }
+            });
+        });
+
+        return chart;
+    },
+
+    setupChartHoverEvents: function () {
+        const self = this;
+
+        function handleChartEvent(event, shouldEnableGrid) {
+            const gridItem = event.target.closest('.grid-stack-item');
+            if (gridItem && self.grid) {
+                self.grid.enableMove(gridItem, shouldEnableGrid);
+                self.grid.enableResize(gridItem, shouldEnableGrid);
+            }
+        }
+
+        function setupChartHandlers(chartElement) {
+            if (!chartElement || chartElement.dataset.chartHandled) {
+                return;
+            };
+            chartElement.dataset.chartHandled = 'true';
+
+            const interactiveElements = chartElement.querySelectorAll('canvas, .tv-lightweight-charts');
+
+            interactiveElements.forEach(el => {
+                el.addEventListener('mouseenter', (e) => handleChartEvent(e, false));
+                el.addEventListener('mouseleave', (e) => handleChartEvent(e, true));
+                el.addEventListener('mousedown', (e) => e.stopPropagation());
+            });
+        }
+
+        document.querySelectorAll('.grid-stack-item-content').forEach(content => {
+            const charts = content.querySelectorAll('.tv-lightweight-charts');
+            charts.forEach(chart => setupChartHandlers(chart));
+        });
+
+        new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1 && node.matches('.tv-lightweight-charts')) {
+                        setupChartHandlers(node);
+                    }
+                });
+            });
+        }).observe(document.body, {childList: true, subtree: true});
     },
 
     hexToRgba: function (hex, alpha) {

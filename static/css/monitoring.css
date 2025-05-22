@@ -657,3 +657,12 @@ button.active:hover {
     font-weight: 600;
     color: var(--gray-100);
 }
+
+.tv-lightweight-charts,
+.tv-lightweight-charts canvas {
+    pointer-events: auto !important;
+}
+
+.tv-lightweight-charts:hover {
+    cursor: crosshair;
+}

@@ -460,4 +460,4 @@ def handle_save_chart_config(data):
 if __name__ == '__main__':
     data_thread = threading.Thread(target=collect_server_data, daemon=True)
     data_thread.start()
-    socketio.run(app, debug=config['general']['debug'], host='0.0.0.0')
+    socketio.run(app, debug=config['general']['debug'] == 'True', host='0.0.0.0')
