@@ -128,9 +128,9 @@ Nedara Monitoring uses a modular configuration file (`config.ini`) that allows y
 [general]
 display_name = Your Monitoring Dashboard
 refresh_rate = 1
-chart_history = 20  # Number of data points for short-term chart
-chart_history_alt = 20000  # Number of data points for long-term chart
-debug = False
+chart_history = 5000  # Number of data points for charts
+chart_adaptive_display = 1  # Non-adaptive display shows all points (value: 0/1)
+debug = 0  # Debug mode (value: 0/1)
 secret_key = your-secret-app-key
 
 [environments]

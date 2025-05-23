@@ -102,11 +102,8 @@ const Monitoring = Nedara.createWidget({
     render: function () {
         this.$selector.find('#server-panel').html(Nedara.renderTemplate('server-panel'));
         this.$selector.find('#chart-panel-cpu').html(Nedara.renderTemplate('chart-panel-cpu'));
-        this.$selector.find('#chart-panel-cpu-alt').html(Nedara.renderTemplate('chart-panel-cpu-alt'));
         this.$selector.find('#chart-panel-http').html(Nedara.renderTemplate('chart-panel-http'));
-        this.$selector.find('#chart-panel-http-alt').html(Nedara.renderTemplate('chart-panel-http-alt'));
         this.$selector.find('#chart-panel-ram').html(Nedara.renderTemplate('chart-panel-ram'));
-        this.$selector.find('#chart-panel-ram-alt').html(Nedara.renderTemplate('chart-panel-ram-alt'));
         this.$selector.find('#postgres-panel').html(Nedara.renderTemplate('postgres-panel'));
 
         this.grid = GridStack.init({
@@ -138,6 +135,9 @@ const Monitoring = Nedara.createWidget({
     handleServerDataUpdate: function (data) {
         this.env = data.environment;
         const widgetConfig = data.widget_config;
+        if (!data.show_postgres_panel) {
+            this.$selector.find('#postgres-panel').hide();
+        }
 
         if (!this.charts) {
             this.charts = [
@@ -147,32 +147,18 @@ const Monitoring = Nedara.createWidget({
                     maxPoints: widgetConfig.chart_history,
                 },
                 {
-                    id: 'CPUChartAlt',
-                    container: 'CPUChartAltContainer',
-                    maxPoints: widgetConfig.chart_history_alt,
-                },
-                {
                     id: 'httpRequestsChart',
                     container: 'httpRequestsChartContainer',
                     maxPoints: widgetConfig.chart_history,
-                },
-                {
-                    id: 'httpRequestsChartAlt',
-                    container: 'httpRequestsChartAltContainer',
-                    maxPoints: widgetConfig.chart_history_alt,
                 },
                 {
                     id: 'RAMChart',
                     container: 'RAMChartContainer',
                     maxPoints: widgetConfig.chart_history,
                 },
-                {
-                    id: 'RAMChartAlt',
-                    container: 'RAMChartAltContainer',
-                    maxPoints: widgetConfig.chart_history_alt,
-                },
             ];
 
+            this.chartAdaptiveDisplay = widgetConfig.chart_adaptive_display;
             this.chartsInfoMap = this.chartsInfoMap || {};
             this.seriesData = this.seriesData || {};
 
@@ -307,18 +293,12 @@ const Monitoring = Nedara.createWidget({
         this.updateDatabaseSelector([...allDatabases].sort());
 
         _.each(this.charts, (chartConf) => {
-            this[chartConf.id].isScrolling = false;
-            if (this[chartConf.id]) {
-                this[chartConf.id].timeScale().subscribeVisibleLogicalRangeChange((newRange) => {
-                    this[chartConf.id].isScrolling = newRange !== null;
-                    if (!this[chartConf.id].isScrolling) {
-                        _.each(this.chartsInfoMap[chartConf.id], (seriesInfo) => {
-                            const seriesData = this.seriesData[chartConf.id][seriesInfo.name];
-                            seriesInfo.series.setData(seriesData.slice(-chartConf.maxPoints));
-                        });
-                        this[chartConf.id].timeScale().fitContent();
-                    }
+            if (this[chartConf.id] && !this[chartConf.id].isPaused) {
+                _.each(this.chartsInfoMap[chartConf.id], (seriesInfo) => {
+                    const seriesData = this.seriesData[chartConf.id][seriesInfo.name];
+                    seriesInfo.series.setData(seriesData.slice(-chartConf.maxPoints));
                 });
+                this[chartConf.id].timeScale().fitContent();
             }
         });
 
@@ -335,11 +315,11 @@ const Monitoring = Nedara.createWidget({
 
                 _.each(this.chartsInfoMap[chartConf.id], (seriesInfo) => {
                     let dataType = '';
-                    if (['CPUChart', 'CPUChartAlt'].includes(chartConf.id)) {
+                    if (['CPUChart'].includes(chartConf.id)) {
                         dataType = 'cpu';
-                    } else if (['httpRequestsChart', 'httpRequestsChartAlt'].includes(chartConf.id)) {
+                    } else if (['httpRequestsChart'].includes(chartConf.id)) {
                         dataType = 'http';
-                    } else if (['RAMChart', 'RAMChartAlt'].includes(chartConf.id)) {
+                    } else if (['RAMChart'].includes(chartConf.id)) {
                         dataType = 'ram';
                     }
 
@@ -351,23 +331,13 @@ const Monitoring = Nedara.createWidget({
                             time: timestamp,
                             value: value,
                         });
-                        if (!this[chartConf.id].isScrolling) {
-                            if (seriesData.length > parseInt(chartConf.maxPoints)) {
-                                const keepData = seriesData.slice(-chartConf.maxPoints);
-                                seriesInfo.series.setData(keepData);
-                            } else {
-                                seriesInfo.series.update({
-                                    time: timestamp,
-                                    value: value,
-                                });
-                            }
+                        if (!this[chartConf.id].isPaused) {
+                            const keepData = seriesData.slice(-chartConf.maxPoints);
+                            seriesInfo.series.setData(keepData);
+                            chartInstance.timeScale().fitContent();
                         }
                     }
                 });
-
-                if (!this[chartConf.id].isScrolling) {
-                    chartInstance.timeScale().fitContent();
-                }
             }
         });
 
@@ -407,7 +377,7 @@ const Monitoring = Nedara.createWidget({
                 borderColor: 'rgba(75, 85, 99, 0.5)',
                 timeVisible: true,
                 secondsVisible: true,
-                fixLeftEdge: true, // TODO: create editable config => ini
+                fixLeftEdge: this.chartAdaptiveDisplay,
                 fixRightEdge: true,
                 lockVisibleTimeRangeOnResize: false,
             },
@@ -451,6 +421,27 @@ const Monitoring = Nedara.createWidget({
                     self.grid.enableMove(gridItem, true);
                 }
             });
+        });
+
+        const pauseButton = document.createElement('div');
+        pauseButton.className = 'chart-pause-button';
+        pauseButton.innerHTML = '⏸';
+        pauseButton.title = 'Pause/Resume updates';
+        chartContainer.appendChild(pauseButton);
+        chart.isPaused = false;
+
+        pauseButton.addEventListener('click', () => {
+            chart.isPaused = !chart.isPaused;
+            pauseButton.innerHTML = chart.isPaused ? '▶' : '⏸';
+
+            if (!chart.isPaused) {
+                const chartId = container.replace('Container', '');
+                _.each(this.chartsInfoMap[chartId], (seriesInfo) => {
+                    const seriesData = this.seriesData[chartId][seriesInfo.name];
+                    seriesInfo.series.setData(seriesData.slice(-this.charts.find(c => c.id === chartId).maxPoints));
+                });
+                chart.timeScale().fitContent();
+            }
         });
 
         return chart;

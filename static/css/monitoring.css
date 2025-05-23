@@ -666,3 +666,23 @@ button.active:hover {
 .tv-lightweight-charts:hover {
     cursor: crosshair;
 }
+
+.chart-pause-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 100;
+    cursor: pointer;
+    font-size: 14px;
+    color: #e5e7eb;
+    background-color: rgba(31, 41, 55, 0.7);
+    border-radius: 4px;
+    padding: 4px 8px;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.chart-pause-button:hover {
+    opacity: 1;
+    background-color: rgba(31, 41, 55, 0.9);
+}

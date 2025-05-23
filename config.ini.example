@@ -7,9 +7,9 @@
 [general]
 display_name =
 refresh_rate = 1
-chart_history = 20
-chart_history_alt = 20000
-debug = False
+chart_history = 5000
+chart_adaptive_display = 1
+debug = 0
 secret_key = your-secret-app-key
 
 [environments]

@@ -141,8 +141,8 @@ def get_widget_config():
         'current_env': CURRENT_ENVIRONMENT,
         'refresh_rate': general_config['refresh_rate'],
         'chart_history': general_config['chart_history'],
-        'chart_history_alt': general_config['chart_history_alt'],
         'chart_info': {},
+        'chart_adaptive_display': general_config.get('chart_adaptive_display', '0') == '0',
     }
     for server_name in env_config['servers']:
         server_config = get_server_config(server_name)
@@ -316,11 +316,13 @@ def collect_server_data():
         try:
             env_config = get_environment_config(CURRENT_ENVIRONMENT)
             stats = {}
+            show_postgres_panel = False
 
             for server_name in env_config['servers']:
                 server_config = get_server_config(server_name)
                 server_type = server_config.get('type')
                 if server_type == 'postgres':
+                    show_postgres_panel = True
                     stats[server_name] = get_postgres_stats(server_config)
                 elif server_type == 'linux':
                     stats[server_name] = get_server_stats(server_config)
@@ -332,7 +334,8 @@ def collect_server_data():
                 'web_status': web_status,
                 'timestamp': datetime.now().strftime('%H:%M:%S'),
                 'environment': CURRENT_ENVIRONMENT,
-                'widget_config': get_widget_config()
+                'widget_config': get_widget_config(),
+                'show_postgres_panel': show_postgres_panel,
             }
 
             server_data_cache = data
@@ -346,9 +349,6 @@ def collect_server_data():
                     save_chart_data('CPUChart', chart_label, timestamp, float(server_data['cpu_usage']), CURRENT_ENVIRONMENT)
                     save_chart_data('httpRequestsChart', chart_label, timestamp, float(server_data['http_requests']), CURRENT_ENVIRONMENT)
                     save_chart_data('RAMChart', chart_label, timestamp, float(server_data['ram_usage_percent']), CURRENT_ENVIRONMENT)
-                    save_chart_data('CPUChartAlt', chart_label, timestamp, float(server_data['cpu_usage']), CURRENT_ENVIRONMENT)
-                    save_chart_data('httpRequestsChartAlt', chart_label, timestamp, float(server_data['http_requests']), CURRENT_ENVIRONMENT)
-                    save_chart_data('RAMChartAlt', chart_label, timestamp, float(server_data['ram_usage_percent']), CURRENT_ENVIRONMENT)
 
             socketio.emit('server_data_update', data)
 
@@ -371,36 +371,9 @@ def index():
     )
 
 
-@app.route('/api/widget_data')
-def api_widget_data():
-    return jsonify(get_widget_config())
-
-
-@app.route('/set_environment/<environment>')
-def set_environment(environment):
-    global CURRENT_ENVIRONMENT
-    if environment in get_available_environments():
-        CURRENT_ENVIRONMENT = environment
-        return jsonify({
-            'status': 'success',
-            'environment': CURRENT_ENVIRONMENT,
-            'url': get_environment_config(CURRENT_ENVIRONMENT)['url'],
-        })
-    else:
-        return jsonify({'status': 'error', 'message': 'Invalid environment'}), 400
-
-
-@app.route('/api/current_environment')
-def current_environment():
-    return jsonify({
-        'environment': CURRENT_ENVIRONMENT,
-        'url': get_environment_config(CURRENT_ENVIRONMENT)['url'],
-    })
-
-
 @socketio.on('connect')
 def handle_connect():
-    print('Client connected')
+    print('SocketIO: Client connected')
     if server_data_cache:
         emit('server_data_update', server_data_cache)
 
@@ -460,4 +433,4 @@ def handle_save_chart_config(data):
 if __name__ == '__main__':
     data_thread = threading.Thread(target=collect_server_data, daemon=True)
     data_thread.start()
-    socketio.run(app, debug=config['general']['debug'] == 'True', host='0.0.0.0')
+    socketio.run(app, debug=config['general']['debug'] == '1', host='0.0.0.0')
