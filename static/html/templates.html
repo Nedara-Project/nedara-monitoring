@@ -163,4 +163,26 @@
         </div>
     </template>
 
+    <template id="processes-panel">
+        <div class="panel-header">
+            <div class="panel-title">Processes</div>
+            <select id="server-selector" class="filter-select">
+                <option value="all">All Servers</option>
+            </select>
+        </div>
+        <table class="data-table" id="processes-table">
+            <thead>
+                <tr>
+                    <th>Server</th>
+                    <th>User</th>
+                    <th>PID</th>
+                    <th>CPU %</th>
+                    <th>RAM %</th>
+                    <th>Command</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </template>
+
 </html>

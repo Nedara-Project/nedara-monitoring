@@ -132,13 +132,16 @@ chart_history = 5000  # Number of data points for charts
 chart_adaptive_display = 1  # Non-adaptive display shows all points (value: 0/1)
 debug = 0  # Debug mode (value: 0/1)
 secret_key = your-secret-app-key
+url_info = https://your-additional-url  # This is an additional URl (display purpose only)
+url_info_name =  # URL display name
 
 [environments]
 available_env = staging, production
 default_env = production
 
 [staging]
-url = https://your-staging-app.com
+url = https://your-staging-app.com  # This URL is being used to check your web app status
+url_name =  # URL display name
 servers = app_server_staging, db_server_staging, postgres_staging
 
 [production]

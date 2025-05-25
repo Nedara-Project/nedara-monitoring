@@ -303,17 +303,32 @@ body {
 }
 
 .simple-link {
-    color: #3b82f6;
+    color: var(--success);
     text-decoration: none;
-    font-weight: 600;
-    transition: color var(--transition-fast);
-    font-size: 0.875rem;
+    font-weight: 500;
+    transition: color 0.3s ease;
     position: relative;
     display: inline-block;
+    padding-bottom: 2px;
+}
+
+.simple-link::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 0%;
+    height: 2px;
+    background-color: currentColor;
+    transition: width 0.3s ease;
 }
 
 .simple-link:hover {
-    color: #60a5fa;
+    color: var(--success-hover);
+}
+
+.simple-link:hover::after {
+    width: 100%;
 }
 
 #loading-container {
@@ -673,7 +688,7 @@ button.active:hover {
     right: 10px;
     z-index: 100;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 25px;
     color: #e5e7eb;
     background-color: rgba(31, 41, 55, 0.7);
     border-radius: 4px;
@@ -685,4 +700,15 @@ button.active:hover {
 .chart-pause-button:hover {
     opacity: 1;
     background-color: rgba(31, 41, 55, 0.9);
+}
+
+#processes-table td:nth-child(4),
+#processes-table td:nth-child(5) {
+    text-align: center;
+    font-weight: 600;
+}
+
+#server-selector {
+    margin-left: auto;
+    width: 200px;
 }

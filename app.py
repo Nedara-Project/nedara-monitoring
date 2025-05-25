@@ -9,8 +9,9 @@ import threading
 import json
 import sqlite3
 import os
+import html
 
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 from datetime import datetime
 from decimal import Decimal
@@ -121,6 +122,7 @@ def get_environment_config(environment):
         raise ValueError(f"Invalid environment: {environment}")
     return {
         'url': config[environment]['url'],
+        'url_name': config[environment]['url_name'],
         'servers': config[environment]['servers'].split(', ')
     }
 
@@ -270,11 +272,49 @@ def get_server_stats(server_config):
             'storage_used': storage_used,
             'storage_available': storage_available,
             'storage_usage_percent': storage_usage_percent,
-            'logs': logs,
+            'logs': html.escape(logs),
             'type': server_config['type'],
             'name': server_config['name'],
             'chart_label': server_config['chart_label'],
             'http_requests': http_requests[0],
+        }
+    except Exception as e:
+        return {'error': str(e), 'server': server_config['name']}
+
+
+def get_processes_stats(server_config):
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(server_config['host'], username=server_config['user'], password=server_config['password'])
+
+        # Command to get processes with CPU, RAM, user and name
+        cmd = "ps aux --sort=-%cpu | head -n 20 | awk '{print $1,$2,$3,$4,$11}'"
+        stdin, stdout, stderr = ssh.exec_command(cmd)
+        processes = stdout.read().decode().strip().split('\n')
+
+        # Skip header line
+        processes = processes[1:] if len(processes) > 1 else []
+
+        ssh.close()
+
+        processes_list = []
+        for proc in processes:
+            if proc.strip():
+                parts = proc.split()
+                if len(parts) >= 5:
+                    processes_list.append({
+                        'user': parts[0],
+                        'pid': parts[1],
+                        'cpu': float(parts[2]),
+                        'ram': float(parts[3]),
+                        'command': ' '.join(parts[4:])
+                    })
+
+        return {
+            'processes': processes_list,
+            'type': 'linux',
+            'name': server_config['name']
         }
     except Exception as e:
         return {'error': str(e), 'server': server_config['name']}
@@ -317,6 +357,7 @@ def collect_server_data():
             env_config = get_environment_config(CURRENT_ENVIRONMENT)
             stats = {}
             show_postgres_panel = False
+            show_http_requests_panel = False
 
             for server_name in env_config['servers']:
                 server_config = get_server_config(server_name)
@@ -325,7 +366,9 @@ def collect_server_data():
                     show_postgres_panel = True
                     stats[server_name] = get_postgres_stats(server_config)
                 elif server_type == 'linux':
+                    show_http_requests_panel = server_config.get('nginx_access_file') is not None
                     stats[server_name] = get_server_stats(server_config)
+                    stats[f"{server_name}_processes"] = get_processes_stats(server_config)
 
             web_status = check_web_status()
 
@@ -336,6 +379,7 @@ def collect_server_data():
                 'environment': CURRENT_ENVIRONMENT,
                 'widget_config': get_widget_config(),
                 'show_postgres_panel': show_postgres_panel,
+                'show_http_requests_panel': show_http_requests_panel,
             }
 
             server_data_cache = data
@@ -345,7 +389,6 @@ def collect_server_data():
             for server_name, server_data in stats.items():
                 if 'chart_label' in server_data and 'type' in server_data and server_data['type'] == 'linux':
                     chart_label = server_data['chart_label']
-
                     save_chart_data('CPUChart', chart_label, timestamp, float(server_data['cpu_usage']), CURRENT_ENVIRONMENT)
                     save_chart_data('httpRequestsChart', chart_label, timestamp, float(server_data['http_requests']), CURRENT_ENVIRONMENT)
                     save_chart_data('RAMChart', chart_label, timestamp, float(server_data['ram_usage_percent']), CURRENT_ENVIRONMENT)
@@ -367,6 +410,9 @@ def index():
         'main.html',
         display_name=config['general'].get('display_name'),
         web_url=env_config.get('url'),
+        web_url_name=env_config.get('url_name'),
+        info_url=config['general'].get('url_info'),
+        info_url_name=config['general'].get('url_info_name'),
         environments=environments,
     )
 

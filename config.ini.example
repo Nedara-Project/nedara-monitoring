@@ -11,6 +11,8 @@ chart_history = 5000
 chart_adaptive_display = 1
 debug = 0
 secret_key = your-secret-app-key
+url_info = https://your-additional-url
+url_info_name =
 
 [environments]
 available_env = env1, env2
@@ -18,6 +20,7 @@ default_env = env2
 
 [env1]
 url = https://your-url1
+url_name =
 servers = serv1, serv2, serv3
 
 [env2]

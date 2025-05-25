@@ -14,6 +14,7 @@ const Monitoring = Nedara.createWidget({
         'change #database-selector': '_onDatabaseSelectorChange',
         'scroll #logs': '_onLogsScroll',
         'click .open_logs': '_onOpenLogsClick',
+        'change #server-selector': '_onServerSelectorChange',
     },
 
     start: async function () {
@@ -105,6 +106,7 @@ const Monitoring = Nedara.createWidget({
         this.$selector.find('#chart-panel-http').html(Nedara.renderTemplate('chart-panel-http'));
         this.$selector.find('#chart-panel-ram').html(Nedara.renderTemplate('chart-panel-ram'));
         this.$selector.find('#postgres-panel').html(Nedara.renderTemplate('postgres-panel'));
+        this.$selector.find('#processes-panel').html(Nedara.renderTemplate('processes-panel'));
 
         this.grid = GridStack.init({
             column: 12,
@@ -134,10 +136,10 @@ const Monitoring = Nedara.createWidget({
 
     handleServerDataUpdate: function (data) {
         this.env = data.environment;
+        this.showPostgresPanel = data.show_postgres_panel;
+        this.showHttpRequestsPanel = data.show_http_requests_panel;
+        this.showLinuxPanel = data.show_linux_panel;
         const widgetConfig = data.widget_config;
-        if (!data.show_postgres_panel) {
-            this.$selector.find('#postgres-panel').hide();
-        }
 
         if (!this.charts) {
             this.charts = [
@@ -167,48 +169,46 @@ const Monitoring = Nedara.createWidget({
                 this.seriesData[chart.id] = {};
 
                 const chartContainer = document.getElementById(chart.id);
-                chartContainer.innerHTML = '';
-                const lightweightContainer = document.createElement('div');
-                lightweightContainer.id = chart.container;
-                lightweightContainer.style.width = '100%';
-                lightweightContainer.style.height = '100%';
-                chartContainer.appendChild(lightweightContainer);
+                if (chartContainer) {
+                    chartContainer.innerHTML = '';
+                    const lightweightContainer = document.createElement('div');
+                    lightweightContainer.id = chart.container;
+                    lightweightContainer.style.width = '100%';
+                    lightweightContainer.style.height = '100%';
+                    chartContainer.appendChild(lightweightContainer);
+                    this[chart.id] = this.createLightweightChart(chart.container);
 
-                this[chart.id] = this.createLightweightChart(chart.container);
+                    _.each(widgetConfig.chart_info, (chartInfo) => {
+                        this.seriesData[chart.id][chartInfo.name] = [];
 
-                _.each(widgetConfig.chart_info, (chartInfo) => {
-                    this.seriesData[chart.id][chartInfo.name] = [];
+                        const series = this[chart.id].addSeries(window.LightweightCharts.AreaSeries, {
+                            title: chartInfo.label,
+                            color: chartInfo.color,
+                            lineColor: chartInfo.color,
+                            lineWidth: 1.5,
+                            lineStyle: 0,
+                            priceLineVisible: false,
+                            topColor: this.hexToRgba(chartInfo.color, 0.4),
+                            bottomColor: 'rgba(0, 0, 0, 0)',
+                        });
 
-                    const series = this[chart.id].addSeries(window.LightweightCharts.AreaSeries, {
-                        title: chartInfo.label,
-                        color: chartInfo.color,
-                        lineColor: chartInfo.color,
-                        lineWidth: 1.5,
-                        lineStyle: 0,
-                        priceLineVisible: false,
-                        topColor: this.hexToRgba(chartInfo.color, 0.4),
-                        bottomColor: 'rgba(0, 0, 0, 0)',
+                        this.chartsInfoMap[chart.id].push({
+                            name: chartInfo.name,
+                            label: chartInfo.label,
+                            series: series,
+                            color: chartInfo.color,
+                            backgroundColor: chartInfo.background_color,
+                        });
+
+                        this.loadHistoricalData(chart.id, chartInfo.label, chart.maxPoints);
                     });
 
-                    this.chartsInfoMap[chart.id].push({
-                        name: chartInfo.name,
-                        label: chartInfo.label,
-                        series: series,
-                        color: chartInfo.color,
-                        backgroundColor: chartInfo.background_color,
-                    });
-
-                    this.loadHistoricalData(chart.id, chartInfo.label, chart.maxPoints);
-                });
-
-                this[chart.id].timeScale().fitContent();
+                    this[chart.id].timeScale().fitContent();
+                }
             });
         }
 
         document.getElementById("environment-selector").value = this.env;
-        document.getElementById("web-url").textContent = data.widget_config.web_url;
-        document.getElementById("web-url").href = data.widget_config.web_url;
-
         const webStatus = data.web_status;
         if (webStatus.status === "Online") {
             document.getElementById("web-url-status-text").textContent = "Online";
@@ -223,9 +223,12 @@ const Monitoring = Nedara.createWidget({
         }
 
         const $linuxServers = $('#linux-servers');
+        const $processesTable = $('#processes-table tbody');
         const chartDataMap = {};
-        $linuxServers.empty();
         const allDatabases = new Set();
+        const linuxServers = [];
+        $linuxServers.empty();
+        $processesTable.empty();
 
         _.each(data.stats, (server, idx) => {
             if (server.error) {
@@ -237,28 +240,43 @@ const Monitoring = Nedara.createWidget({
 
             switch (server.type) {
                 case 'linux':
-                    $linuxServers.prepend(Nedara.renderTemplate('linux-server',
-                        Object.assign({
-                            'id': idx,
-                            'cpu_usage_class': this.getStatusClass(server.cpu_usage),
-                            'ram_usage_class': this.getStatusClass(server.ram_usage_percent),
-                            'storage_usage_class': this.getStatusClass(server.storage_usage_percent),
-                            'health_class': this.getHealthStatus({
-                                'cpu': server.cpu_usage,
-                                'ram': server.ram_usage_percent,
-                                'storage': server.storage_usage_percent,
-                            }),
-                        }, server),
-                    ));
-                    chartDataMap[server.chart_label] = {};
-                    chartDataMap[server.chart_label]['cpu'] = parseFloat(server.cpu_usage);
-                    chartDataMap[server.chart_label]['http'] = parseFloat(server.http_requests);
-                    chartDataMap[server.chart_label]['ram'] = parseFloat(server.ram_usage_percent);
-                    let logContainer = this.$container.find('.log-container[data-log-source="%s"]'
-                        .replace('%s', server.name));
-                    logContainer.html(this.colorizeLogs(server.logs));
+                    if (idx.endsWith('_processes') && server.processes) {
+                        linuxServers.push(server.name.replace('_processes', ''));
+                        server.processes.forEach(process => {
+                            $processesTable.append(`
+                                <tr data-server="${server.name.replace('_processes', '')}">
+                                    <td>${server.name.replace('_processes', '')}</td>
+                                    <td>${process.user}</td>
+                                    <td>${process.pid}</td>
+                                    <td class="${this.getProcessStatusClass(process.cpu)}">${process.cpu.toFixed(1)}%</td>
+                                    <td class="${this.getProcessStatusClass(process.ram)}">${process.ram.toFixed(1)}%</td>
+                                    <td class="truncate" title="${process.command}">${process.command}</td>
+                                </tr>
+                            `);
+                        });
+                    } else {
+                        $linuxServers.prepend(Nedara.renderTemplate('linux-server',
+                            Object.assign({
+                                'id': idx,
+                                'cpu_usage_class': this.getStatusClass(server.cpu_usage),
+                                'ram_usage_class': this.getStatusClass(server.ram_usage_percent),
+                                'storage_usage_class': this.getStatusClass(server.storage_usage_percent),
+                                'health_class': this.getHealthStatus({
+                                    'cpu': server.cpu_usage,
+                                    'ram': server.ram_usage_percent,
+                                    'storage': server.storage_usage_percent,
+                                }),
+                            }, server),
+                        ));
+                        chartDataMap[server.chart_label] = {};
+                        chartDataMap[server.chart_label]['cpu'] = parseFloat(server.cpu_usage);
+                        chartDataMap[server.chart_label]['http'] = parseFloat(server.http_requests);
+                        chartDataMap[server.chart_label]['ram'] = parseFloat(server.ram_usage_percent);
+                        let logContainer = this.$container.find('.log-container[data-log-source="%s"]'
+                            .replace('%s', server.name));
+                        logContainer.html(this.colorizeLogs(server.logs));
+                    }
                     break;
-
                 case 'postgres':
                     document.getElementById("postgres-status").className = "status-indicator status-healthy";
                     document.getElementById("main-db").textContent = server.main_db;
@@ -291,6 +309,7 @@ const Monitoring = Nedara.createWidget({
         });
 
         this.updateDatabaseSelector([...allDatabases].sort());
+        this.updateServerSelector(linuxServers);
 
         _.each(this.charts, (chartConf) => {
             if (this[chartConf.id] && !this[chartConf.id].isPaused) {
@@ -308,10 +327,12 @@ const Monitoring = Nedara.createWidget({
                 const now = new Date();
                 const timestamp = Math.floor(now.getTime() / 1000);
                 const container = document.getElementById(chartConf.container);
-                this[chartConf.id].resize(
-                    container.clientWidth,
-                    container.clientHeight,
-                );
+                if (container) {
+                    this[chartConf.id].resize(
+                        container.clientWidth,
+                        container.clientHeight,
+                    );
+                }
 
                 _.each(this.chartsInfoMap[chartConf.id], (seriesInfo) => {
                     let dataType = '';
@@ -346,6 +367,15 @@ const Monitoring = Nedara.createWidget({
         this.highlightCriticalQueries();
         this.applyFilters();
         this.updateOverallStatus();
+
+        let postgresPanelDOM = this.$container.find('#postgres-panel').parent().get(0);
+        let httpRequestsPanelDOM = this.$container.find('#chart-panel-http').parent().get(0);
+        if (!data.show_postgres_panel && postgresPanelDOM && !_.isUndefined(postgresPanelDOM)) {
+            this.grid.removeWidget(postgresPanelDOM);
+        }
+        if (!data.show_http_requests_panel && httpRequestsPanelDOM && !_.isUndefined(httpRequestsPanelDOM)) {
+            this.grid.removeWidget(httpRequestsPanelDOM);
+        }
 
         this.$container.find('#loading-container').remove();
         this.$container.find('#monitoring').show();
@@ -424,7 +454,7 @@ const Monitoring = Nedara.createWidget({
         });
 
         const pauseButton = document.createElement('div');
-        pauseButton.className = 'chart-pause-button';
+        pauseButton.className = 'chart-pause-button simple-link';
         pauseButton.innerHTML = '⏸';
         pauseButton.title = 'Pause/Resume updates';
         chartContainer.appendChild(pauseButton);
@@ -432,7 +462,7 @@ const Monitoring = Nedara.createWidget({
 
         pauseButton.addEventListener('click', () => {
             chart.isPaused = !chart.isPaused;
-            pauseButton.innerHTML = chart.isPaused ? '▶' : '⏸';
+            pauseButton.innerHTML = chart.isPaused ? '⏭' : '⏸';
 
             if (!chart.isPaused) {
                 const chartId = container.replace('Container', '');
@@ -540,42 +570,46 @@ const Monitoring = Nedara.createWidget({
     },
 
     colorizeLogs: function (logs) {
-        return logs.split("\n").map((line) => {
-            const replacements = [
-                [/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})/g, "<span class=\"log-date\">$1</span>"],
-                [/(INFO)/g, "<span class=\"log-info\">$1</span>"],
-                [/(ERROR)/g, "<span class=\"log-error\">$1</span>"],
-                [/(WARNING)/g, "<span class=\"log-warning\">$1</span>"],
-                [/(DEBUG)/g, "<span class=\"log-debug\">$1</span>"],
-                [/(IDs: \[.*?\])/g, "<span class=\"log-id\">$1</span>"],
-                [/Starting job `(.*?)`/g, "Starting job `<span class=\"log-job\">$1</span>`"],
-                [/Job `(.*?)` done/g, "Job `<span class=\"log-job\">$1</span>` done"],
-            ];
-            replacements.forEach(([regex, replacement]) => {
-                line = line.replace(regex, replacement);
-            });
-            return `<div class="log-line">${line}</div>`;
-        }).join("\n");
+        if (logs) {
+            return logs.split("\n").map((line) => {
+                const replacements = [
+                    [/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})/g, "<span class=\"log-date\">$1</span>"],
+                    [/(INFO)/g, "<span class=\"log-info\">$1</span>"],
+                    [/(ERROR)/g, "<span class=\"log-error\">$1</span>"],
+                    [/(WARNING)/g, "<span class=\"log-warning\">$1</span>"],
+                    [/(DEBUG)/g, "<span class=\"log-debug\">$1</span>"],
+                    [/(IDs: \[.*?\])/g, "<span class=\"log-id\">$1</span>"],
+                    [/Starting job `(.*?)`/g, "Starting job `<span class=\"log-job\">$1</span>`"],
+                    [/Job `(.*?)` done/g, "Job `<span class=\"log-job\">$1</span>` done"],
+                ];
+                replacements.forEach(([regex, replacement]) => {
+                    line = line.replace(regex, replacement);
+                });
+                return `<div class="log-line">${line}</div>`;
+            }).join("\n");
+        }
     },
 
     updateDatabaseSelector: function (databases) {
-        this.availableDatabases = databases;
-        const dbSelector = document.getElementById("database-selector");
-        const currentSelection = dbSelector.value;
-        while (dbSelector.options.length > 1) {
-            dbSelector.remove(1);
-        }
-        databases.forEach(db => {
-            const option = document.createElement("option");
-            option.value = db;
-            option.textContent = db;
-            dbSelector.appendChild(option);
-        });
-        if (databases.includes(currentSelection) || currentSelection === 'all') {
-            dbSelector.value = currentSelection;
-        } else {
-            dbSelector.value = 'all';
-            this.dbFilter = 'all';
+        if (this.showPostgresPanel) {
+            this.availableDatabases = databases;
+            const dbSelector = document.getElementById("database-selector");
+            const currentSelection = dbSelector.value;
+            while (dbSelector.options.length > 1) {
+                dbSelector.remove(1);
+            }
+            databases.forEach(db => {
+                const option = document.createElement("option");
+                option.value = db;
+                option.textContent = db;
+                dbSelector.appendChild(option);
+            });
+            if (databases.includes(currentSelection) || currentSelection === 'all') {
+                dbSelector.value = currentSelection;
+            } else {
+                dbSelector.value = 'all';
+                this.dbFilter = 'all';
+            }
         }
     },
 
@@ -610,6 +644,51 @@ const Monitoring = Nedara.createWidget({
         setInterval(() => location.reload(), 24 * 60 * 60 * 1000);
     },
 
+    updateServerSelector: function (servers) {
+        const serverSelector = document.getElementById("server-selector");
+        const currentSelection = serverSelector.value;
+        if (serverSelector) {
+            // Keep the first option (All Servers)
+            while (serverSelector.options.length > 1) {
+                serverSelector.remove(1);
+            }
+            servers.forEach(server => {
+                const option = document.createElement("option");
+                option.value = server;
+                option.textContent = server;
+                serverSelector.appendChild(option);
+            });
+            if (servers.includes(currentSelection) || currentSelection === 'all') {
+                serverSelector.value = currentSelection;
+            } else {
+                serverSelector.value = 'all';
+                this.serverFilter = 'all';
+            }
+        }
+    },
+
+    filterProcessesByServer: function (server) {
+        this.serverFilter = server;
+        this.applyProcessesFilters();
+    },
+
+    applyProcessesFilters: function () {
+        const rows = document.querySelectorAll("#processes-table tbody tr");
+        rows.forEach((row) => {
+            const processServer = row.getAttribute("data-server");
+            const serverMatch = this.serverFilter === "all" || processServer === this.serverFilter;
+            if (serverMatch) {
+                row.style.display = "";
+            } else {
+                row.style.display = "none";
+            }
+        });
+    },
+
+    getProcessStatusClass: function(value) {
+        return value < 30 ? "usage-low" : value < 70 ? "usage-medium" : "usage-high";
+    },
+
     // ************************************************************
     // * EVENT HANDLERS
     // ************************************************************
@@ -639,10 +718,15 @@ const Monitoring = Nedara.createWidget({
     },
 
     _onOpenLogsClick: function (ev) {
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
         ev.preventDefault();
         const $link = $(ev.currentTarget);
         const $logsContent = $link.closest(".panel-title").find(".logs_content");
-        const rawLogs = $logsContent.text().trim();
+        const rawLogs = escapeHtml($logsContent.text().trim());
         const coloredLogs = this.colorizeLogs(rawLogs);
         const $modal = $(Nedara.renderTemplate("modal-logs", {
             'source': $link.data('source'),
@@ -655,6 +739,10 @@ const Monitoring = Nedara.createWidget({
                 $modal.remove();
             };
         });
+    },
+
+    _onServerSelectorChange: function (ev) {
+        this.filterProcessesByServer(ev.target.value);
     },
 });
 

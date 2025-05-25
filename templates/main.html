@@ -59,7 +59,12 @@
                             <span class="custom-arrow">▼</span>
                         </div>
                     </div>
-                    <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">{{ web_url }}</a>
+                    <p>
+                        <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">🔗 {{ web_url_name }} </a>
+                    </p>
+                    <p>
+                        <a href="{{ info_url }}" target="_blank" class="simple-link">🔗 {{ info_url_name }}</a>
+                    </p>
                 </div>
             </div>
         </div>
@@ -105,11 +110,21 @@
         <div class="grid-stack-item"
              gs-x="4"
              gs-y="7"
-             gs-w="8"
+             gs-w="4"
              gs-h="6"
              gs-no-resize="false"
              gs-no-move="false">
             <div class="grid-stack-item-content" id="postgres-panel"></div>
+        </div>
+
+        <div class="grid-stack-item"
+            gs-x="8"
+            gs-y="7"
+            gs-w="4"
+            gs-h="6"
+            gs-no-resize="false"
+            gs-no-move="false">
+            <div class="grid-stack-item-content" id="processes-panel"></div>
         </div>
     </div>
 </body>
