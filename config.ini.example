@@ -5,6 +5,7 @@
 ; Important: Pay attention having correct access rights on files you mention (cfr. SSH user being used).
 
 [general]
+port = 5000
 display_name =
 refresh_rate = 1
 chart_history = 5000

@@ -126,6 +126,7 @@ Nedara Monitoring uses a modular configuration file (`config.ini`) that allows y
 
 ```ini
 [general]
+port = 5000  # Port used by the app
 display_name = Your Monitoring Dashboard
 refresh_rate = 1
 chart_history = 5000  # Number of data points for charts
