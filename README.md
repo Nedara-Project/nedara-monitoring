@@ -9,7 +9,7 @@ A comprehensive monitoring solution for PostgreSQL databases and Linux servers.
 Nedara Monitoring is an open-source web application that provides real-time monitoring and visualization of PostgreSQL database servers and Linux systems. It offers a sleek dashboard interface displaying critical system metrics including:
 
 - PostgreSQL database statistics, active queries, and performance metrics
-- Linux server CPU, RAM, storage utilization and HTTP requests (nginx)
+- Linux server CPU, RAM, storage utilization, processes and HTTP requests (nginx)
 - Real-time performance charts for tracking system resource usage
 - Server logs visualization with syntax highlighting
 - Web application health monitoring
@@ -30,6 +30,7 @@ Nedara Monitoring is an open-source web application that provides real-time moni
   - HTTP requests (via nginx)
   - Storage utilization
   - System logs visualization with syntax highlighting
+  - Running processes
 - **Status indicators** for quick system health assessment
 - **Responsive dashboard** with draggable and resizable widgets
 - **Performance charts** with short-term and long-term history
