@@ -55,10 +55,11 @@ const Monitoring = Nedara.createWidget({
                     !isNaN(item.value),
                 ).sort((a, b) => a.time - b.time);
 
+                const uniqueData = self.ensureUniqueTimestamps(formattedData);
                 const seriesInfo = self.chartsInfoMap[data.chart_id]?.find(info => info.label === data.series_name);
                 if (seriesInfo) {
-                    self.seriesData[data.chart_id][data.series_name] = formattedData;
-                    seriesInfo.series.setData(formattedData);
+                    self.seriesData[data.chart_id][data.series_name] = uniqueData;
+                    seriesInfo.series.setData(uniqueData);
                     self[data.chart_id].timeScale().fitContent();
                 }
             }
@@ -348,13 +349,21 @@ const Monitoring = Nedara.createWidget({
                     const seriesData = this.seriesData[chartConf.id][seriesInfo.label];
 
                     if (seriesData) {
+                        let newTimestamp = timestamp;
+                        if (seriesData.length > 0) {
+                            const lastTimestamp = seriesData[seriesData.length - 1].time;
+                            if (newTimestamp <= lastTimestamp) {
+                                newTimestamp = lastTimestamp + 1;
+                            }
+                        }
                         seriesData.push({
                             time: timestamp,
                             value: value,
                         });
                         if (!this[chartConf.id].isPaused) {
                             const keepData = seriesData.slice(-chartConf.maxPoints);
-                            seriesInfo.series.setData(keepData);
+                            const uniqueData = this.ensureUniqueTimestamps(keepData);
+                            seriesInfo.series.setData(uniqueData);
                             chartInstance.timeScale().fitContent();
                         }
                     }
@@ -390,7 +399,6 @@ const Monitoring = Nedara.createWidget({
                 background: {type: 'solid', color: '#1f2937'},
                 textColor: '#e5e7eb',
             },
-            autoSize: true,
             grid: {
                 vertLines: {color: 'rgba(75, 85, 99, 0.2)'},
                 horzLines: {color: 'rgba(75, 85, 99, 0.2)'},
@@ -687,6 +695,37 @@ const Monitoring = Nedara.createWidget({
 
     getProcessStatusClass: function(value) {
         return value < 30 ? "usage-low" : value < 70 ? "usage-medium" : "usage-high";
+    },
+
+    ensureUniqueTimestamps: function(data) {
+        if (!data || data.length === 0) {
+            return data;
+        }
+
+        // Sort by time first
+        data.sort((a, b) => a.time - b.time);
+
+        // Remove or adjust duplicate timestamps
+        const uniqueData = [];
+        let lastTime = null;
+
+        data.forEach(item => {
+            let currentTime = item.time;
+
+            // If we have a duplicate timestamp, increment by 1 second
+            if (lastTime !== null && currentTime <= lastTime) {
+                currentTime = lastTime + 1;
+            }
+
+            uniqueData.push({
+                time: currentTime,
+                value: item.value,
+            });
+
+            lastTime = currentTime;
+        });
+
+        return uniqueData;
     },
 
     // ************************************************************

@@ -232,6 +232,7 @@ def get_server_stats(server_config):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(server_config['host'], username=server_config['user'], password=server_config['password'])
 
+        # Note/CPU Usage: This does not work properly on Ubuntu 18.04 and below => % peak when executing cmd
         stdin, stdout, stderr = ssh.exec_command("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'")
         cpu_usage = stdout.read().decode().strip()
 
