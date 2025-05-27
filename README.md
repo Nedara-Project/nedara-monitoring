@@ -55,7 +55,7 @@ Nedara Monitoring is an open-source web application that provides real-time moni
    git submodule update --init --recursive  # Important for nedarajs and any other submodules
    ```
 
-2. Install the required Python packages:
+2. Install the required Python packages (use of `virtualenv/virtualenvwrapper` is recommended):
    ```bash
    pip install -r requirements.txt
    ```
@@ -67,47 +67,41 @@ Nedara Monitoring is an open-source web application that provides real-time moni
 
 4. Modify `config.ini` to match your server configurations (see Configuration section below)
 
-5. Run the application using gunicorn (optional, recommended - or you can launch it via python3 directly):
+5. Run the application using `python3` (or alternatively `gunicorn` - do not forget to `pip install gunicorn` then):
    ```bash
-   gunicorn -b 0.0.0.0:8000 app:app
+   python3 app.py
    ```
 
 ### Production Deployment
 
-For production environments, we recommend (optional):
+For production environments, you can launch `app.py` directly via Python or use Gunicorn (for example).
 
-1. Running with gunicorn:
-   ```bash
-   gunicorn -b 127.0.0.1:8000 --workers=4 app:app
-   ```
-
-2. Setting up a systemd service for automatic startup and management:
+You could also set up a systemd service for automatic startup and management. For instance:
    ```
    [Unit]
    Description=Nedara Monitoring
    After=network.target
 
    [Service]
-   User=youruser
-   WorkingDirectory=/path/to/nedara-monitoring
-   ExecStart=/path/to/gunicorn -b 127.0.0.1:8000 --workers=4 app:app
+   User=kea
+   WorkingDirectory=/home/kea/nedara-monitoring
+   ExecStart=/home/kea/.virtualenvs/monitoring/bin/python3 app.py
    Restart=always
-   StandardOutput=syslog
-   StandardError=syslog
+   RestartSec=5
    SyslogIdentifier=nedara-monitoring
 
    [Install]
    WantedBy=multi-user.target
    ```
 
-3. Using Nginx as a reverse proxy:
+Another idea is to use Nginx as a reverse proxy (if you need it). For instance:
    ```
    server {
        listen 80;
        server_name monitoring.yourdomain.com;
 
        location / {
-           proxy_pass http://127.0.0.1:8000;
+           proxy_pass http://127.0.0.1:5000;
            proxy_set_header Host $host;
            proxy_set_header X-Real-IP $remote_addr;
        }
