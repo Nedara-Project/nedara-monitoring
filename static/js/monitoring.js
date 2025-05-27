@@ -15,6 +15,7 @@ const Monitoring = Nedara.createWidget({
         'scroll #logs': '_onLogsScroll',
         'click .open_logs': '_onOpenLogsClick',
         'change #server-selector': '_onServerSelectorChange',
+        'click #refresh-interface': '_onRefreshInterfaceBtnClick',
     },
 
     start: async function () {
@@ -782,6 +783,11 @@ const Monitoring = Nedara.createWidget({
 
     _onServerSelectorChange: function (ev) {
         this.filterProcessesByServer(ev.target.value);
+    },
+
+    _onRefreshInterfaceBtnClick: function () {
+        localStorage.removeItem('grid-layout');
+        window.location.reload();
     },
 });
 
