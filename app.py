@@ -367,7 +367,8 @@ def collect_server_data():
                     show_postgres_panel = True
                     stats[server_name] = get_postgres_stats(server_config)
                 elif server_type == 'linux':
-                    show_http_requests_panel = server_config.get('nginx_access_file') is not None
+                    if server_config.get('nginx_access_file') is not None and not show_http_requests_panel:
+                        show_http_requests_panel = True
                     stats[server_name] = get_server_stats(server_config)
                     stats[f"{server_name}_processes"] = get_processes_stats(server_config)
 
