@@ -64,12 +64,16 @@
                             <span class="custom-arrow">▼</span>
                         </div>
                     </div>
+                    {% if web_url %}
                     <p>
-                        <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">🔗 {{ web_url_name }} </a>
+                        <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">🔗 {{ web_url_name or web_url }} </a>
                     </p>
+                    {% endif %}
+                    {% if info_url %}
                     <p>
-                        <a href="{{ info_url }}" target="_blank" class="simple-link">🔗 {{ info_url_name }}</a>
+                        <a href="{{ info_url }}" target="_blank" class="simple-link">🔗 {{ info_url_name or info_url }}</a>
                     </p>
+                    {% endif %}
                 </div>
             </div>
         </div>
