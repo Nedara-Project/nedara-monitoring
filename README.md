@@ -78,7 +78,7 @@ Nedara Monitoring is an open-source web application that provides real-time moni
 For production environments, you can launch `app.py` directly via Python or use Gunicorn (for example).
 
 You could also set up a systemd service for automatic startup and management. For instance:
-   ```
+   ```ini
    [Unit]
    Description=Nedara Monitoring
    After=network.target
@@ -96,7 +96,7 @@ You could also set up a systemd service for automatic startup and management. Fo
    ```
 
 Another idea is to use Nginx as a reverse proxy (if you need it). For instance:
-   ```
+   ```nginx
    server {
        listen 80;
        server_name monitoring.yourdomain.com;
