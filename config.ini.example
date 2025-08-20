@@ -14,6 +14,11 @@ debug = 0
 secret_key = your-secret-app-key
 url_info = https://your-additional-url
 url_info_name =
+email_notif_smtp_server =
+email_notif_smtp_port =
+email_notif_login =
+email_notif_password =
+email_notif_recipients = recipient1@mail.com, recipient2@mail.com
 
 [environments]
 available_env = env1, env2

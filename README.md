@@ -35,6 +35,7 @@ Nedara Monitoring is an open-source web application that provides real-time moni
 - **Responsive dashboard** with draggable and resizable widgets
 - **Performance charts** with short-term and long-term history
 - **Using SQLite** to save chart data
+- **Mail notification** via SMTP (login/password credentials) for the environment being monitored (or default env)
 
 ## Installation
 
@@ -130,6 +131,11 @@ debug = 0  # Debug mode (value: 0/1)
 secret_key = your-secret-app-key
 url_info = https://your-additional-url  # This is an additional URl (display purpose only)
 url_info_name =  # URL display name
+email_notif_smtp_server =
+email_notif_smtp_port =
+email_notif_login =
+email_notif_password =
+email_notif_recipients = recipient1@mail.com, recipient2@mail.com
 
 [environments]
 available_env = staging, production

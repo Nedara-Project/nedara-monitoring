@@ -10,12 +10,17 @@ import json
 import sqlite3
 import os
 import html
+import smtplib
+import urllib3
+import fcntl
 
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from contextlib import closing
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 
 class CustomJSONEncoder(json.JSONEncoder):
@@ -28,6 +33,7 @@ class CustomJSONEncoder(json.JSONEncoder):
 
 
 # Configuration
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 config = configparser.ConfigParser()
 config.read('config.ini')
 CURRENT_ENVIRONMENT = config['environments']['default_env']
@@ -61,6 +67,11 @@ CREATE TABLE IF NOT EXISTS chart_config (
 
 server_data_cache = {}
 last_update_time = None
+error_mail_sent_datetime = None
+TMP_DIR = os.path.join(os.path.dirname(__file__), "tmp")
+os.makedirs(TMP_DIR, exist_ok=True)
+LOCK_FILE = TMP_DIR + "/error_mail.lock"
+STATE_FILE = TMP_DIR + "/error_mail_state"
 
 
 def init_db():
@@ -71,6 +82,62 @@ def init_db():
 
 def connect_db():
     return sqlite3.connect(DATABASE)
+
+
+def send_notification_mail(data):
+    global error_mail_sent_datetime
+    general_config = config['general']
+
+    try:
+        with open(LOCK_FILE, "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            last_sent = None
+            if os.path.exists(STATE_FILE):
+                with open(STATE_FILE, "r") as f:
+                    ts = f.read().strip()
+                    if ts:
+                        last_sent = datetime.fromisoformat(ts)
+
+            can_send = not last_sent or (datetime.now() - last_sent > timedelta(minutes=15))
+            has_mail_config = general_config.get('email_notif_smtp_server') and \
+                general_config.get('email_notif_smtp_port') and \
+                general_config.get('email_notif_login') and \
+                general_config.get('email_notif_password') and \
+                general_config.get('email_notif_recipients')
+
+            if not can_send or not has_mail_config:
+                return False
+
+            recipients = [email.strip() for email in general_config['email_notif_recipients'].split(',')]
+
+            msg = MIMEMultipart('alternative')
+            msg['From'] = general_config['email_notif_login']
+            msg['To'] = ', '.join(recipients)
+            msg['Subject'] = data.get('subject')
+            msg.attach(MIMEText(data.get('body', ''), 'html', 'utf-8'))
+
+            with smtplib.SMTP(
+                host=general_config['email_notif_smtp_server'],
+                port=general_config['email_notif_smtp_port'],
+            ) as server:
+                server.starttls()
+                server.login(general_config['email_notif_login'], general_config['email_notif_password'])
+                server.sendmail(msg['From'], recipients, msg.as_string())
+
+            print(f"✅ Notification email sent successfully: {data.get('subject')} -> {recipients}")
+
+            error_mail_sent_datetime = datetime.now()
+            with open(STATE_FILE, "w") as f:
+                f.write(error_mail_sent_datetime.isoformat())
+
+            return True
+
+    except Exception as e:
+        print(f"❌ Error while sending notification email: {e}")
+        if os.path.exists(STATE_FILE):
+            os.remove(STATE_FILE)
+        return False
 
 
 def save_chart_data(chart_id, series_name, timestamp, value, environment):
@@ -160,6 +227,7 @@ def get_widget_config():
 
 def get_postgres_stats(postgres_config):
     server_type = postgres_config['type']
+    server_name = postgres_config['name']
     main_db = postgres_config['database']
     try:
         postgres_config.pop('type', None)
@@ -223,6 +291,13 @@ def get_postgres_stats(postgres_config):
             'main_db': main_db,
         }
     except Exception as e:
+        send_notification_mail({
+            'subject': '⚠️ Nedara Monitoring — Error ⚠️',
+            'body': f"""
+                <b>Connection could be established with PostgreSQL!</b>
+                <p>Server concerned: {server_name}</p>
+            """,
+        })
         return {'error': str(e), 'server': 'postgres'}
 
 
@@ -280,6 +355,13 @@ def get_server_stats(server_config):
             'http_requests': http_requests[0],
         }
     except Exception as e:
+        send_notification_mail({
+            'subject': '⚠️ Nedara Monitoring — Error ⚠️',
+            'body': f"""
+                <b>SSH connection could be established!</b>
+                <p>Server concerned: {server_config['name']}</p>
+            """,
+        })
         return {'error': str(e), 'server': server_config['name']}
 
 
@@ -333,12 +415,26 @@ def check_web_status():
                 "response_time": f"{response_time:.2f} ms",
             }
         else:
+            send_notification_mail({
+                'subject': '⚠️ Nedara Monitoring — Error ⚠️',
+                'body': f"""
+                    <b>An error occurred with the Web Application!</b>
+                    <p>Web URL: {web_url}</p>
+                """,
+            })
             return {
                 "status": f"Error: {response.status_code}",
                 "status_code": response.status_code,
                 "response_time": "N/A",
             }
     except requests.exceptions.RequestException as e:
+        send_notification_mail({
+            'subject': '⚠️ Nedara Monitoring — Error ⚠️',
+            'body': f"""
+                <b>Web Application seems offline!</b>
+                <p>Web URL: {web_url}</p>
+            """,
+        })
         return {
             "status": "Offline",
             "status_code": 500,
