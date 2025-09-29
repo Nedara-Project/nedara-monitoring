@@ -294,7 +294,7 @@ def get_postgres_stats(postgres_config):
         send_notification_mail({
             'subject': '⚠️ Nedara Monitoring — Error ⚠️',
             'body': f"""
-                <b>Connection could be established with PostgreSQL!</b>
+                <b>Connection could not be established with PostgreSQL!</b>
                 <p>Server concerned: {server_name}</p>
             """,
         })
@@ -358,7 +358,7 @@ def get_server_stats(server_config):
         send_notification_mail({
             'subject': '⚠️ Nedara Monitoring — Error ⚠️',
             'body': f"""
-                <b>SSH connection could be established!</b>
+                <b>SSH connection could not be established!</b>
                 <p>Server concerned: {server_config['name']}</p>
             """,
         })
