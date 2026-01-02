@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-import psycopg2
+import psycopg
 import paramiko
 import requests
 import configparser
@@ -37,7 +37,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 config = configparser.ConfigParser()
 config.read('config.ini')
 CURRENT_ENVIRONMENT = config['environments']['default_env']
-REFRESH_RATE = int(config['general']['refresh_rate'])
+REFRESH_RATE = float(config['general']['refresh_rate'])
 
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
@@ -232,7 +232,7 @@ def get_postgres_stats(postgres_config):
     try:
         postgres_config.pop('type', None)
         postgres_config.pop('name', None)
-        conn = psycopg2.connect(**postgres_config)
+        conn = psycopg.connect(**postgres_config)
         cursor = conn.cursor()
         cursor.execute("""
             SELECT
@@ -323,7 +323,7 @@ def get_server_stats(server_config):
         storage_size = storage_stats[0]
         storage_used = storage_stats[1]
         storage_available = storage_stats[2]
-        storage_usage_percent = round((int(storage_used[:-1]) / int(storage_size[:-1])) * 100, 2)
+        storage_usage_percent = round((float(storage_used[:-1]) / float(storage_size[:-1])) * 100, 2)
 
         logs = ""
         if server_config.get('log_file'):
@@ -332,7 +332,19 @@ def get_server_stats(server_config):
 
         http_requests = '0'
         if server_config.get('nginx_access_file'):
-            cmd = """grep -E "\\[$(date -u -d '%d seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')|\\[$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')" %s | awk -v start="$(date -u -d '%d seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')" -v end="$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')" 'BEGIN { count=0 } { gsub(/^\\[/, "", $4); split($4, dt, /[/:]/); ts = dt[1]"/"dt[2]"/"dt[3]":"dt[4]":"dt[5]":"dt[6]; if (ts >= start && ts <= end) count++ } END { print count }'""" % (REFRESH_RATE, server_config["nginx_access_file"], REFRESH_RATE)
+            cmd = (
+                f"grep -E "
+                f"\"\\[$(date -u -d '{REFRESH_RATE} seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')"
+                f"|\\[$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')\" "
+                f"{server_config['nginx_access_file']} | "
+                f"awk -v start=\"$(date -u -d '{REFRESH_RATE} seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')\" "
+                f"-v end=\"$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')\" "
+                f"'BEGIN {{ count=0 }} "
+                f"{{ gsub(/^\\[/, \"\", $4); split($4, dt, /[/:]/); "
+                f"ts = dt[1]\"/\"dt[2]\"/\"dt[3]\":\"dt[4]\":\"dt[5]\":\"dt[6]; "
+                f"if (ts >= start && ts <= end) count++ }} "
+                f"END {{ print count }}'"
+            )
             stdin, stdout, stderr = ssh.exec_command(cmd)
             http_requests = stdout.read().decode().strip().split()
 

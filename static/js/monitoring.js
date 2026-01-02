@@ -694,11 +694,11 @@ const Monitoring = Nedara.createWidget({
         });
     },
 
-    getProcessStatusClass: function(value) {
+    getProcessStatusClass: function (value) {
         return value < 30 ? "usage-low" : value < 70 ? "usage-medium" : "usage-high";
     },
 
-    ensureUniqueTimestamps: function(data) {
+    ensureUniqueTimestamps: function (data) {
         if (!data || data.length === 0) {
             return data;
         }
