@@ -318,12 +318,19 @@ def get_server_stats(server_config):
         ram_available = int(ram_stats[2])
         ram_usage_percent = round((ram_used / ram_total) * 100, 2)
 
-        stdin, stdout, stderr = ssh.exec_command("df -h / | grep -v Filesystem | awk '{print $2, $3, $4}'")
+        stdin, stdout, stderr = ssh.exec_command("df -B1 / | tail -1 | awk '{print $2, $3, $4}'")
         storage_stats = stdout.read().decode().strip().split()
-        storage_size = storage_stats[0]
-        storage_used = storage_stats[1]
-        storage_available = storage_stats[2]
-        storage_usage_percent = round((float(storage_used[:-1]) / float(storage_size[:-1])) * 100, 2)
+        storage_size_bytes = int(storage_stats[0])
+        storage_used_bytes = int(storage_stats[1])
+        storage_available_bytes = int(storage_stats[2])
+        storage_usage_percent = round((storage_used_bytes / storage_size_bytes) * 100, 2)
+        storage_size = f"{round(storage_size_bytes / (1024**3), 1)}G"
+        storage_used = (
+            f"{round(storage_used_bytes / (1024**2), 1)}M"
+            if storage_used_bytes < 1024**3
+            else f"{round(storage_used_bytes / (1024**3), 1)}G"
+        )
+        storage_available = f"{round(storage_available_bytes / (1024**3), 1)}G"
 
         logs = ""
         if server_config.get('log_file'):
