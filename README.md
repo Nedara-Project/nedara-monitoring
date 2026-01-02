@@ -190,11 +190,12 @@ Nedara Monitoring uses several libraries:
 
 - Flask for the web application framework
     - Flask-SocketIO for WebSockets integration
-- psycopg2 for PostgreSQL connections
+- psycopg for PostgreSQL connections
 - paramiko for SSH connections to Linux servers
 - Lightweight Charts (by TradingView) for interactive charts
 - GridStack for the dashboard layout
 - nedarajs (included as a submodule) for UI components
+- Python >=3.13 (for psycopg lib -> or you'll have to use psycopg2 below python 3.13: [see commit](https://github.com/Nedara-Project/nedara-monitoring/commit/4491f85a1300a228393d9c5fb6f06b50cb7cc16e))
 
 ## License
 
