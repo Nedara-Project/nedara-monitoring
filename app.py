@@ -340,17 +340,15 @@ def get_server_stats(server_config):
         http_requests = '0'
         if server_config.get('nginx_access_file'):
             cmd = (
-                f"grep -E "
-                f"\"\\[$(date -u -d '{REFRESH_RATE} seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')"
-                f"|\\[$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')\" "
-                f"{server_config['nginx_access_file']} | "
-                f"awk -v start=\"$(date -u -d '{REFRESH_RATE} seconds ago' +'%%d/%%b/%%Y:%%H:%%M:%%S')\" "
-                f"-v end=\"$(date -u +'%%d/%%b/%%Y:%%H:%%M:%%S')\" "
-                f"'BEGIN {{ count=0 }} "
-                f"{{ gsub(/^\\[/, \"\", $4); split($4, dt, /[/:]/); "
+                f"awk -v start=\"$(date -u -d '{REFRESH_RATE} seconds ago' '+%d/%b/%Y:%H:%M:%S')\" "
+                f"-v end=\"$(date -u '+%d/%b/%Y:%H:%M:%S')\" "
+                f"'{{ "
+                f"gsub(/^\\[/, \"\", $4); "
+                f"split($4, dt, /[/:]/); "
                 f"ts = dt[1]\"/\"dt[2]\"/\"dt[3]\":\"dt[4]\":\"dt[5]\":\"dt[6]; "
-                f"if (ts >= start && ts <= end) count++ }} "
-                f"END {{ print count }}'"
+                f"if (ts >= start && ts <= end) count++ "
+                f"}} END {{ print count+0 }}' "
+                f"{server_config['nginx_access_file']}"
             )
             stdin, stdout, stderr = ssh.exec_command(cmd)
             http_requests = stdout.read().decode().strip().split()
