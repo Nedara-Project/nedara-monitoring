@@ -232,6 +232,7 @@ def get_postgres_stats(postgres_config):
     try:
         postgres_config.pop('type', None)
         postgres_config.pop('name', None)
+        postgres_config['dbname'] = postgres_config.pop('database', None)
         conn = psycopg.connect(**postgres_config)
         cursor = conn.cursor()
         cursor.execute("""
