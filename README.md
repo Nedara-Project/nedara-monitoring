@@ -81,18 +81,22 @@ python3 app.py
 
 The dashboard is available at `http://localhost:5000` (or whatever port you set in `[general]`).
 
-For production, use Gunicorn:
+**Optional — Gunicorn (recommended for production):**
+
+Gunicorn is not required but provides better stability under load. If you choose to use it:
 
 ```bash
-pip install gunicorn
+pip install gunicorn eventlet
 gunicorn --worker-class eventlet -w 1 app:app -b 0.0.0.0:5000
 ```
 
-> Use exactly **1 worker** — Flask-SocketIO's threading mode requires a single worker process. Use `eventlet` or `gevent` as the worker class.
+> Use exactly **1 worker** — Flask-SocketIO requires a single worker process. Use `eventlet` or `gevent` as the worker class.
 
 ## Production Deployment
 
 ### systemd service
+
+**With Gunicorn (recommended):**
 
 ```ini
 [Unit]
@@ -111,11 +115,34 @@ SyslogIdentifier=nedara-monitoring
 WantedBy=multi-user.target
 ```
 
+**Without Gunicorn (python3 only):**
+
+```ini
+[Unit]
+Description=Nedara Monitoring
+After=network.target
+
+[Service]
+User=youruser
+WorkingDirectory=/opt/nedara-monitoring
+ExecStart=/opt/nedara-monitoring/.venv/bin/python3 app.py
+Restart=always
+RestartSec=5
+SyslogIdentifier=nedara-monitoring
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ```bash
 sudo systemctl enable --now nedara-monitoring
 ```
 
 ### Nginx reverse proxy (optional)
+
+> The `Upgrade` / `Connection` headers are required in all configurations for WebSocket (Socket.IO) to work through Nginx.
+
+**HTTP only:**
 
 ```nginx
 server {
@@ -129,11 +156,57 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 ```
 
-> The `Upgrade` / `Connection` headers are required for WebSocket (Socket.IO) to work through Nginx.
+**HTTPS with SSL (recommended for production):**
+
+Obtain a certificate first, e.g. with Let's Encrypt:
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d monitoring.yourdomain.com
+```
+
+Or place your own certificate files and use the following configuration:
+
+```nginx
+# Redirect HTTP → HTTPS
+server {
+    listen 80;
+    server_name monitoring.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS
+server {
+    listen 443 ssl;
+    server_name monitoring.yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/monitoring.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/monitoring.yourdomain.com/privkey.pem;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+> If you use self-signed certificates, set `verify = False` is already the default for the web health check in `check_web_status`. For Let's Encrypt or a trusted CA, you can remove that bypass in `app.py`.
 
 ## Configuration
 
