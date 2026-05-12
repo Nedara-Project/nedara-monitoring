@@ -168,7 +168,10 @@ const Monitoring = Nedara.createWidget({
 
         const chartCard = el.parentElement?.parentElement;
         const chartHeader = chartCard?.querySelector('.chart-header');
-        if (chartHeader) chartHeader.appendChild(pauseBtn);
+        if (chartHeader) {
+            chartHeader.querySelector('.chart-pause-button')?.remove();
+            chartHeader.appendChild(pauseBtn);
+        }
 
         pauseBtn.addEventListener('click', () => {
             chart.isPaused = !chart.isPaused;

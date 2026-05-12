@@ -810,3 +810,39 @@ button.active {
         max-height: 94vh;
     }
 }
+
+/* ── Footer ─────────────────────────────────────────────── */
+#dashboard-footer {
+    text-align: center;
+    padding: 0.25rem 1rem 0.75rem;
+}
+#dashboard-footer a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+    text-decoration: none;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    background: #f1f5f9;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+#dashboard-footer a::before { content: '⭐'; font-size: 0.7rem; }
+#dashboard-footer a:hover {
+    color: #3b82f6;
+    border-color: #93c5fd;
+    background: #eff6ff;
+}
+.dark #dashboard-footer a {
+    color: #94a3b8;
+    border-color: #334155;
+    background: #1e293b;
+}
+.dark #dashboard-footer a:hover {
+    color: #60a5fa;
+    border-color: #60a5fa;
+    background: #1e3a5f;
+}

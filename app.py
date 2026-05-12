@@ -13,6 +13,7 @@ import html
 import smtplib
 import urllib3
 import fcntl
+import re
 
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -66,11 +67,14 @@ CREATE TABLE IF NOT EXISTS chart_config (
 
 server_data_cache = {}    # {environment: data_dict}
 client_environments = {}  # {sid: environment}
-error_mail_sent_datetime = None
 TMP_DIR = os.path.join(os.path.dirname(__file__), "tmp")
 os.makedirs(TMP_DIR, exist_ok=True)
-LOCK_FILE = TMP_DIR + "/error_mail.lock"
-STATE_FILE = TMP_DIR + "/error_mail_state"
+def _mail_files(environment):
+    safe = re.sub(r'[^a-zA-Z0-9_-]', '_', environment)
+    return (
+        os.path.join(TMP_DIR, f"error_mail_{safe}.lock"),
+        os.path.join(TMP_DIR, f"error_mail_{safe}.state"),
+    )
 
 
 def init_db():
@@ -83,17 +87,91 @@ def connect_db():
     return sqlite3.connect(DATABASE)
 
 
-def send_notification_mail(data):
-    global error_mail_sent_datetime
+def _build_mail_body(title, description, details, environment):
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    rows_html = ''.join(
+        f"""<tr>
+              <td style="padding:6px 0;font-size:13px;color:#64748b;font-weight:500;width:130px;vertical-align:top;">{k}</td>
+              <td style="padding:6px 0;font-size:13px;color:#1e293b;vertical-align:top;word-break:break-all;">{v}</td>
+            </tr>"""
+        for k, v in details.items()
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+        <!-- Header -->
+        <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:14px 14px 0 0;padding:24px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <span style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.65);letter-spacing:0.08em;text-transform:uppercase;">Nedara Monitoring</span>
+                <div style="margin-top:6px;font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">{title}</div>
+              </td>
+              <td align="right" style="vertical-align:top;">
+                <div style="width:14px;height:14px;background:#ef4444;border-radius:50%;box-shadow:0 0 0 4px rgba(239,68,68,0.3);margin-top:6px;"></div>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <!-- Body -->
+        <tr><td style="background:#ffffff;padding:28px 32px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+          <p style="margin:0 0 20px;font-size:15px;color:#1e293b;line-height:1.6;">{description}</p>
+
+          <!-- Details table -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:4px 16px;margin-bottom:24px;">
+            <tr><td>
+              <table width="100%" cellpadding="0" cellspacing="0">
+                {rows_html}
+              </table>
+            </td></tr>
+          </table>
+
+          <!-- Alert banner -->
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr><td style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;">
+              <span style="font-size:13px;color:#dc2626;font-weight:500;">
+                An automated alert has been triggered. Please investigate as soon as possible.
+              </span>
+            </td></tr>
+          </table>
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:0 0 14px 14px;padding:16px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="font-size:12px;color:#94a3b8;">
+                Environment: <span style="font-weight:600;color:#6366f1;">{environment}</span>
+              </td>
+              <td align="right" style="font-size:12px;color:#94a3b8;">{now}</td>
+            </tr>
+          </table>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
+def send_notification_mail(data, environment='default'):
     general_config = config['general']
+    lock_file_path, state_file_path = _mail_files(environment)
 
     try:
-        with open(LOCK_FILE, "w") as lock_file:
+        with open(lock_file_path, "w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
             last_sent = None
-            if os.path.exists(STATE_FILE):
-                with open(STATE_FILE, "r") as f:
+            if os.path.exists(state_file_path):
+                with open(state_file_path, "r") as f:
                     ts = f.read().strip()
                     if ts:
                         last_sent = datetime.fromisoformat(ts)
@@ -128,9 +206,8 @@ def send_notification_mail(data):
 
             print(f"✅ Notification email sent: {data.get('subject')} -> {recipients}")
 
-            error_mail_sent_datetime = datetime.now()
-            with open(STATE_FILE, "w") as f:
-                f.write(error_mail_sent_datetime.isoformat())
+            with open(state_file_path, "w") as f:
+                f.write(datetime.now().isoformat())
 
             return True
 
@@ -233,7 +310,7 @@ def get_widget_config(environment):
     return data
 
 
-def get_postgres_stats(postgres_config):
+def get_postgres_stats(postgres_config, environment='default'):
     server_type = postgres_config['type']
     server_name = postgres_config['name']
     main_db = postgres_config['database']
@@ -302,16 +379,18 @@ def get_postgres_stats(postgres_config):
         }
     except Exception as e:
         send_notification_mail({
-            'subject': '⚠️ Nedara Monitoring — Error ⚠️',
-            'body': f"""
-                <b>Connection could not be established with PostgreSQL!</b>
-                <p>Server concerned: {server_name}</p>
-            """,
-        })
+            'subject': '⚠️ Nedara Monitoring — PostgreSQL Unreachable',
+            'body': _build_mail_body(
+                title='PostgreSQL Unreachable',
+                description='A connection to the PostgreSQL server could not be established. The database may be down or unreachable from the monitoring host.',
+                details={'Server': server_name, 'Environment': environment},
+                environment=environment,
+            ),
+        }, environment)
         return {'error': str(e), 'server': 'postgres', 'type': 'postgres'}
 
 
-def get_server_stats(server_config):
+def get_server_stats(server_config, environment='default'):
     try:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -413,12 +492,14 @@ def get_server_stats(server_config):
         }
     except Exception as e:
         send_notification_mail({
-            'subject': '⚠️ Nedara Monitoring — Error ⚠️',
-            'body': f"""
-                <b>SSH connection could not be established!</b>
-                <p>Server concerned: {server_config['name']}</p>
-            """,
-        })
+            'subject': '⚠️ Nedara Monitoring — SSH Unreachable',
+            'body': _build_mail_body(
+                title='SSH Unreachable',
+                description='An SSH connection to the server could not be established. The server may be down or the SSH service unavailable.',
+                details={'Server': server_config['name'], 'Environment': environment},
+                environment=environment,
+            ),
+        }, environment)
         return {'error': str(e), 'type': 'linux', 'server': server_config['name']}
 
 
@@ -476,12 +557,14 @@ def check_web_status(environment):
             }
         else:
             send_notification_mail({
-                'subject': '⚠️ Nedara Monitoring — Error ⚠️',
-                'body': f"""
-                    <b>An error occurred with the Web Application!</b>
-                    <p>Web URL: {web_url}</p>
-                """,
-            })
+                'subject': f'⚠️ Nedara Monitoring — Web App Error ({response.status_code})',
+                'body': _build_mail_body(
+                    title='Web Application Error',
+                    description=f'The web application returned an unexpected HTTP status code. This may indicate a server-side error or misconfiguration.',
+                    details={'URL': web_url, 'Status code': str(response.status_code), 'Environment': environment},
+                    environment=environment,
+                ),
+            }, environment)
             return {
                 "status": f"Error: {response.status_code}",
                 "status_code": response.status_code,
@@ -489,12 +572,14 @@ def check_web_status(environment):
             }
     except requests.exceptions.RequestException as e:
         send_notification_mail({
-            'subject': '⚠️ Nedara Monitoring — Error ⚠️',
-            'body': f"""
-                <b>Web Application seems offline!</b>
-                <p>Web URL: {web_url}</p>
-            """,
-        })
+            'subject': '⚠️ Nedara Monitoring — Web App Offline',
+            'body': _build_mail_body(
+                title='Web Application Offline',
+                description='The web application appears to be offline or unreachable. No response was received within the timeout period.',
+                details={'URL': web_url, 'Environment': environment},
+                environment=environment,
+            ),
+        }, environment)
         return {
             "status": "Offline",
             "status_code": 500,
@@ -595,9 +680,9 @@ def collect_server_data(environment):
                 server_type = sc.get('type')
                 result = {}
                 if server_type == 'postgres':
-                    result[server_name] = get_postgres_stats(sc)
+                    result[server_name] = get_postgres_stats(sc, environment)
                 elif server_type == 'linux':
-                    result[server_name] = get_server_stats(sc)
+                    result[server_name] = get_server_stats(sc, environment)
                     result[f"{server_name}_processes"] = get_processes_stats(sc)
                 elif server_type == 'pgbouncer':
                     result[server_name] = get_pgbouncer_stats(sc)
