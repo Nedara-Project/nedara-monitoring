@@ -105,7 +105,7 @@ def _build_mail_body(title, description, details, environment):
       <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
 
         <!-- Header -->
-        <tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:14px 14px 0 0;padding:24px 32px;">
+        <tr><td style="background:#6366f1;border-radius:14px 14px 0 0;padding:24px 32px;">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
               <td>
