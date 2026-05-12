@@ -5,136 +5,126 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ display_name }}</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Anti-FOUC: apply saved theme before any render -->
+    <script>
+        (function () {
+            const t = localStorage.getItem('nedara-theme') || 'auto';
+            const dark = t === 'dark' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            if (dark) document.documentElement.classList.add('dark');
+        })();
+    </script>
+
+    <!-- Tailwind: layout utilities only (no dark: variants) -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } }
+        }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style type="text/tailwindcss">
+        body { @apply font-sans antialiased; }
+    </style>
+
     <link rel="stylesheet" href="{{ url_for('static', filename='css/monitoring.css') }}">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@7.2.3/dist/gridstack.min.css" />
     <script src="{{ url_for('static', filename='js/lib/jquery/jquery.min.js') }}"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.min.js"></script>
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     <script src="{{ url_for('static', filename='js/lib/underscorejs/underscore.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/lib/nedarajs/nedara.js') }}" type="module"></script>
-    <script src="{{ url_for('static', filename='js/lib/gridstack/gridstack.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/monitoring.js') }}" type="module"></script>
 </head>
 <body>
+
+    <!-- Loading screen -->
     <div id="loading-container">
         <div class="wave-container">
             <div class="wave"></div>
             <div class="wave"></div>
             <div class="wave"></div>
         </div>
-        <p>Loading {{ display_name }}...</p>
+        <p class="loading-text">Loading {{ display_name }}…</p>
     </div>
 
-    <div class="grid-stack" id="monitoring" style="display: none;">
-        <div class="grid-stack-item"
-             gs-x="0"
-             gs-y="0"
-             gs-w="2"
-             gs-h="13"
-             gs-no-resize="false"
-             gs-no-move="false">
-            <div class="grid-stack-item-content">
-                <div class="header-content">
-                    <div>
-                        <a href="https://github.com/nedara-project" target="_blank" class="nedara-link">
-                            Powered by Nedara Project
-                        </a>
-                    </div>
-                    <h2>
-                        {{ display_name }}
-                        <a href="#" class="simple-link" id="refresh-interface" title="Refresh the interface">
-                            <small>🗘</small>
-                        </a>
-                    </h2>
-                    <div class="status-container">
-                        <div class="status-indicator status-healthy" id="overall-status"></div>
-                        <span id="status-text">All Systems Operational</span>
-                    </div>
-                    <div class="update-container">
-                        <div id="dashboard-time">
-                            Last updated: <span id="last-update-time"></span>
-                        </div>
-                        <br/>
-                        <div class="select-container">
-                            <select id="environment-selector">
-                                {% for env in environments %}
-                                <option value="{{ env }}">{{ env }}</option>
-                                {% endfor %}
-                            </select>
-                            <span class="custom-arrow">▼</span>
-                        </div>
-                    </div>
-                    {% if web_url %}
-                    <p>
-                        <a href="{{ web_url }}" target="_blank" id="web-url" class="simple-link">🔗 {{ web_url_name or web_url }} </a>
-                    </p>
-                    {% endif %}
-                    {% if info_url %}
-                    <p>
-                        <a href="{{ info_url }}" target="_blank" class="simple-link">🔗 {{ info_url_name or info_url }}</a>
-                    </p>
-                    {% endif %}
+    <!-- Dashboard (hidden until first data arrives) -->
+    <div id="monitoring" style="display:none;">
+
+        <!-- Sticky top bar -->
+        <header id="topbar">
+            <div class="topbar-brand">
+                <div id="status-badge">
+                    <div class="status-indicator status-healthy" id="overall-status"></div>
+                    <span id="status-text">Operational</span>
+                </div>
+                <h1 id="app-title">{{ display_name }}</h1>
+            </div>
+            <div class="topbar-controls">
+                <span class="topbar-time">
+                    Updated <span id="last-update-time">—</span>
+                </span>
+                <a href="#" id="refresh-interface" title="Refresh">↺</a>
+                <select id="environment-selector" class="filter-select">
+                    {% for env in environments %}
+                    <option value="{{ env }}">{{ env }}</option>
+                    {% endfor %}
+                </select>
+                <span id="mail-indicator" class="topbar-mail-indicator" style="display:none" title="Notifications email actives">✉ Mail</span>
+                <button id="theme-toggle" class="btn-theme" title="Cycle theme: Auto → Light → Dark">
+                    <span id="theme-icon">⊙</span>
+                    <span id="theme-label">Auto</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Scrollable content -->
+        <main id="dashboard-main">
+
+            <!-- Server overview row -->
+            <div id="section-servers">
+                <div id="web-app-card"></div>
+                <div id="linux-servers-row"></div>
+            </div>
+
+            <!-- Charts grid (2 per row) -->
+            <div id="section-charts">
+                <div class="dash-card chart-card" id="chart-panel-cpu">
+                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">CPU Usage %</span></div>
+                    <div id="CPUChart" class="chart-inner"></div>
+                </div>
+                <div class="dash-card chart-card" id="chart-panel-http">
+                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">HTTP Requests</span></div>
+                    <div id="httpRequestsChart" class="chart-inner"></div>
+                </div>
+                <div class="dash-card chart-card" id="chart-panel-ram">
+                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">RAM Usage %</span></div>
+                    <div id="RAMChart" class="chart-inner"></div>
+                </div>
+                <div class="dash-card chart-card" id="chart-panel-loadavg">
+                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">Load Average (1m)</span></div>
+                    <div id="LoadAvgChart" class="chart-inner"></div>
+                </div>
+                <div class="dash-card chart-card" id="chart-panel-network">
+                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">Network (MB/s)</span></div>
+                    <div id="NetworkChart" class="chart-inner"></div>
+                </div>
+                <div class="dash-card chart-card" id="chart-panel-diskio">
+                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">Disk I/O (MB/s)</span></div>
+                    <div id="DiskIOChart" class="chart-inner"></div>
                 </div>
             </div>
-        </div>
 
-        <div class="grid-stack-item"
-             gs-x="2"
-             gs-y="0"
-             gs-w="2"
-             gs-h="13"
-             gs-no-resize="false"
-             gs-no-move="false">
-            <div class="grid-stack-item-content" id="server-panel"></div>
-        </div>
+            <!-- Details row: PostgreSQL + Processes + PGBouncer (when configured) -->
+            <div id="section-details">
+                <div class="dash-card detail-panel" id="postgres-panel" style="display:none"></div>
+                <div class="dash-card detail-panel" id="processes-panel"></div>
+                <div class="dash-card detail-panel" id="pgbouncer-panel" style="display:none"></div>
+            </div>
 
-        <div class="grid-stack-item chart-panel"
-             gs-x="4"
-             gs-y="0"
-             gs-w="3"
-             gs-h="7"
-             gs-no-resize="false"
-             gs-no-move="false">
-            <div class="grid-stack-item-content" id="chart-panel-cpu"></div>
-        </div>
-        <div class="grid-stack-item chart-panel"
-             gs-x="7"
-             gs-y="0"
-             gs-w="3"
-             gs-h="7"
-             gs-no-resize="false"
-             gs-no-move="false">
-            <div class="grid-stack-item-content" id="chart-panel-http"></div>
-        </div>
-        <div class="grid-stack-item chart-panel"
-             gs-x="10"
-             gs-y="0"
-             gs-w="2"
-             gs-h="7"
-             gs-no-resize="false"
-             gs-no-move="false">
-            <div class="grid-stack-item-content" id="chart-panel-ram"></div>
-        </div>
-
-        <div class="grid-stack-item"
-             gs-x="4"
-             gs-y="7"
-             gs-w="4"
-             gs-h="6"
-             gs-no-resize="false"
-             gs-no-move="false">
-            <div class="grid-stack-item-content" id="postgres-panel"></div>
-        </div>
-
-        <div class="grid-stack-item"
-            gs-x="8"
-            gs-y="7"
-            gs-w="4"
-            gs-h="6"
-            gs-no-resize="false"
-            gs-no-move="false">
-            <div class="grid-stack-item-content" id="processes-panel"></div>
-        </div>
+        </main>
     </div>
+
 </body>
 </html>

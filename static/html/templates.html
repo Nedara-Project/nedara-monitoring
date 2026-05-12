@@ -1,139 +1,97 @@
 <html>
 
-    <template id="server-panel">
-        <div class="panel-header">
-            <div class="panel-title">
+    <!-- Web App Status Card -->
+    <template id="web-app-card">
+        <div class="dash-card">
+            <div class="card-header">
                 <div class="status-indicator" id="web-url-status"></div>
-                Web Application Status
+                <span class="card-title">Web Application</span>
             </div>
-        </div>
-        <div class="grid grid-cols-1 gap-2">
-            <div class="metric-card">
-                <div class="metric-name">Status</div>
-                <div class="metric-value" id="web-url-status-text">Checking...</div>
-                <div class="metric-name">Response Time</div>
-                <div class="metric-value" id="web-url-response-time">N/A</div>
+            <div class="metric-item">
+                <span class="metric-label">Status</span>
+                <span class="metric-value-text" id="web-url-status-text">Checking…</span>
             </div>
+            <div class="metric-item">
+                <span class="metric-label">Response</span>
+                <span class="metric-value-text" id="web-url-response-time">—</span>
+            </div>
+            <div id="web-url-link-container"></div>
         </div>
-        <br/>
-        <div id="linux-servers"></div>
     </template>
 
+    <!-- Linux server metrics card -->
     <template id="linux-server">
-        <div class="panel-header">
-            <div class="panel-title">
-                <div class="status-indicator status-linux-server {{health_class}}" id="{{id}}" data-name="{{name}}"></div>{{name}}
-                {{#if logs}}<a href="#" class="simple-link open_logs" data-source="{{name}}">[View logs]</a>{{/if}}
-                <div class="logs_content" style="display:none;">{{logs}}</div>
+        <div class="dash-card server-card">
+            <div class="card-header">
+                <div class="status-indicator status-linux-server {{health_class}}" id="{{id}}" data-name="{{name}}"></div>
+                <span class="card-title">{{name}}</span>
+                {{#if logs}}<a href="#" class="logs-link open_logs" data-source="{{name}}">Logs</a>{{/if}}
             </div>
-        </div>
-        <div class="grid grid-cols-1 gap-2">
-            <div class="metric-card">
-                <div class="metric-name">CPU Usage</div>
-                <div class="metric-value">{{cpu_usage}}%</div>
+            <div class="metric-bar-row">
+                <div class="metric-bar-header">
+                    <span class="metric-label">CPU</span>
+                    <span class="metric-value-sm {{cpu_value_class}}">{{cpu_usage}}%</span>
+                </div>
                 <div class="progress-bar">
-                    <div class="progress-value {{cpu_usage_class}}" style="width: {{cpu_usage}}%;"></div>
+                    <div class="progress-value {{cpu_usage_class}}" style="width:{{cpu_usage}}%"></div>
                 </div>
             </div>
-            <div class="metric-card">
-                <div class="metric-name">RAM Usage</div>
-                <div class="metric-value">{{ram_usage_percent}}%</div>
-                <div class="metric-info">{{ram_used}} / {{ram_total}} MB → {{ram_available}} MB</div>
+            <div class="metric-bar-row">
+                <div class="metric-bar-header">
+                    <span class="metric-label">RAM</span>
+                    <span class="metric-value-sm {{ram_value_class}}">{{ram_usage_percent}}%</span>
+                </div>
                 <div class="progress-bar">
-                    <div class="progress-value {{ram_usage_class}}" style="width: {{ram_usage_percent}}%;"></div>
+                    <div class="progress-value {{ram_usage_class}}" style="width:{{ram_usage_percent}}%"></div>
                 </div>
             </div>
-            <div class="metric-card">
-                <div class="metric-name">Storage</div>
-                <div class="metric-value">{{storage_usage_percent}}%</div>
-                <div class="metric-info">{{storage_used}} / {{storage_size}} → {{storage_available}}</div>
-                <div class="progress-bar">
-                    <div class="progress-value {{storage_usage_class}}" style="width: {{storage_usage_percent}}%;"></div>
+            <div class="metric-bar-row">
+                <div class="metric-bar-header">
+                    <span class="metric-label">Disk</span>
+                    <span class="metric-value-sm {{storage_value_class}}">{{storage_usage_percent}}%</span>
                 </div>
+                <div class="progress-bar">
+                    <div class="progress-value {{storage_usage_class}}" style="width:{{storage_usage_percent}}%"></div>
+                </div>
+                <div class="metric-detail">{{storage_used}} / {{storage_size}} — {{storage_available}} free</div>
             </div>
         </div>
-        <br/>
     </template>
 
-    <template id="chart-panel-cpu">
-        <div class="panel-header">
-            <div class="panel-title">CPU Usage %</div>
-        </div>
-        <div class="chart-container">
-            <div id="CPUChart" style="width: 100%; height: 100%;"></div>
-        </div>
-    </template>
-
-    <template id="chart-panel-cpu-alt">
-        <div class="panel-header">
-            <div class="panel-title">CPU Usage % (Alt)</div>
-        </div>
-        <div class="chart-container">
-            <div id="CPUChartAlt" style="width: 100%; height: 100%;"></div>
+    <!-- Unreachable server card -->
+    <template id="linux-server-unreachable">
+        <div class="dash-card server-card server-card-unreachable">
+            <div class="card-header">
+                <div class="status-indicator status-critical" id="{{id}}" data-name="{{name}}"></div>
+                <span class="card-title">{{name}}</span>
+            </div>
+            <div class="unreachable-message">Server unreachable</div>
         </div>
     </template>
 
-    <template id="chart-panel-http">
-        <div class="panel-header">
-            <div class="panel-title">HTTP Requests</div>
-        </div>
-        <div class="chart-container">
-            <div id="httpRequestsChart" style="width: 100%; height: 100%;"></div>
-        </div>
-    </template>
-
-    <template id="chart-panel-http-alt">
-        <div class="panel-header">
-            <div class="panel-title">HTTP Requests (Alt)</div>
-        </div>
-        <div class="chart-container">
-            <div id="httpRequestsChartAlt" style="width: 100%; height: 100%;"></div>
-        </div>
-    </template>
-
-    <template id="chart-panel-ram">
-        <div class="panel-header">
-            <div class="panel-title">RAM Usage %</div>
-        </div>
-        <div class="chart-container">
-            <div id="RAMChart" style="width: 100%; height: 100%;"></div>
-        </div>
-    </template>
-
-    <template id="chart-panel-ram-alt">
-        <div class="panel-header">
-            <div class="panel-title">RAM Usage % (Alt)</div>
-        </div>
-        <div class="chart-container">
-            <div id="RAMChartAlt" style="width: 100%; height: 100%;"></div>
-        </div>
-    </template>
-
+    <!-- PostgreSQL panel -->
     <template id="postgres-panel">
-        <div class="panel-header">
-            <div class="panel-title"><div class="status-indicator status-healthy" id="postgres-status" data-name="postgres"></div>PostgreSQL</div>
+        <div class="panel-heading">
+            <div class="status-indicator status-healthy" id="postgres-status" data-name="postgres"></div>
+            <span class="panel-title">PostgreSQL</span>
+            <button class="panel-expand-btn" data-panel="postgres" title="Fullscreen">⤢</button>
         </div>
-            <div class="stats-grid">
-                <div class="text-sm">Statistics for database: <span id="main-db"></span></div>
-                <div class="text-sm">Active Queries: <span id="query-count"></span></div>
-                <div class="text-sm">Avg Wait Time (Active): <span id="avg-wait-time-active"></span></div>
-                <div class="text-sm">Avg Wait Time (Idle): <span id="avg-wait-time-idle"></span></div>
-                <div class="text-sm">Database Size (uncompressed): <span id="postgres-db-size"></span></div>
-            </div>
-            <div>
-                <button id="filter-active">
-                    Show Active
-                </button>
-                <button id="filter-idle">
-                    Show Idle
-                </button>
-                <button id="filter-all">
-                    Show All
-                </button>
-                <select id="database-selector" class="filter-select">
-                    <option value="all">All Databases</option>
-                </select>
-            </div>
+        <div class="stats-grid">
+            <div class="stat-item">Database <span id="main-db"></span></div>
+            <div class="stat-item">Active Queries <span id="query-count"></span></div>
+            <div class="stat-item">Avg Wait (Active) <span id="avg-wait-time-active"></span></div>
+            <div class="stat-item">Avg Wait (Idle) <span id="avg-wait-time-idle"></span></div>
+            <div class="stat-item col-span-2">Size (uncompressed) <span id="postgres-db-size"></span></div>
+        </div>
+        <div class="panel-filters">
+            <button id="filter-active">Active</button>
+            <button id="filter-idle">Idle</button>
+            <button id="filter-all" class="active">All</button>
+            <select id="database-selector" class="filter-select" style="margin-left:auto">
+                <option value="all">All Databases</option>
+            </select>
+        </div>
+        <div class="table-wrapper">
             <table class="data-table" id="postgres-queries">
                 <thead>
                     <tr>
@@ -141,7 +99,7 @@
                         <th>State</th>
                         <th>Wait Event</th>
                         <th>Wait Time</th>
-                        <th style="width: 60%;">Query</th>
+                        <th style="width:52%">Query</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -149,40 +107,81 @@
         </div>
     </template>
 
+    <!-- Logs modal -->
     <template id="modal-logs">
         <div class="modal-overlay active" id="modal-overlay">
             <div class="modal-content">
                 <div class="modal-header">
-                    <span class="modal-title">Logs</span>
+                    <span class="modal-title">Logs — {{source}}</span>
                     <button class="modal-close" id="close-modal">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <div class="log-container" data-log-source="{{source}}" id="logs">{{logs}}</div>
+                    <div class="log-container" id="modal-log-container"></div>
                 </div>
             </div>
         </div>
     </template>
 
+    <!-- Processes panel -->
     <template id="processes-panel">
-        <div class="panel-header">
-            <div class="panel-title">Processes</div>
-            <select id="server-selector" class="filter-select">
+        <div class="panel-heading">
+            <span class="panel-title">Processes</span>
+            <button class="panel-expand-btn" data-panel="processes" title="Fullscreen">⤢</button>
+            <select id="server-selector" class="filter-select" style="margin-left:auto">
                 <option value="all">All Servers</option>
             </select>
         </div>
-        <table class="data-table" id="processes-table">
-            <thead>
-                <tr>
-                    <th>Server</th>
-                    <th>User</th>
-                    <th>PID</th>
-                    <th>CPU %</th>
-                    <th>RAM %</th>
-                    <th>Command</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
+        <div class="table-wrapper">
+            <table class="data-table" id="processes-table">
+                <thead>
+                    <tr>
+                        <th>Server</th>
+                        <th>User</th>
+                        <th>PID</th>
+                        <th>CPU %</th>
+                        <th>RAM %</th>
+                        <th>Command</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </template>
+
+    <!-- PGBouncer panel -->
+    <template id="pgbouncer-panel">
+        <div class="panel-heading">
+            <div class="status-indicator status-healthy" id="pgbouncer-status"></div>
+            <span class="panel-title">PGBouncer</span>
+            <button class="panel-expand-btn" data-panel="pgbouncer" title="Fullscreen">⤢</button>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-item">Active Clients <span id="pgb-cl-active">—</span></div>
+            <div class="stat-item">Waiting <span id="pgb-cl-waiting">—</span></div>
+            <div class="stat-item">Active Servers <span id="pgb-sv-active">—</span></div>
+            <div class="stat-item">Idle Servers <span id="pgb-sv-idle">—</span></div>
+            <div class="stat-item">Requests/s <span id="pgb-qps">—</span></div>
+            <div class="stat-item">Max Wait <span id="pgb-max-wait">—</span></div>
+            <div class="stat-item">Avg Query <span id="pgb-avg-query">—</span></div>
+            <div class="stat-item">Pool Size <span id="pgb-pool-size">—</span></div>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table" id="pgbouncer-pools">
+                <thead>
+                    <tr>
+                        <th>Database</th>
+                        <th>User</th>
+                        <th>Active Cl.</th>
+                        <th>Waiting</th>
+                        <th>Active Sv.</th>
+                        <th>Idle Sv.</th>
+                        <th>Max Wait</th>
+                        <th>Mode</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
     </template>
 
 </html>

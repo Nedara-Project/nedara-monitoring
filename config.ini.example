@@ -1,7 +1,7 @@
 ; This is an example. You need to adapt this config file.
 ; The configuration is modular. What is mandatory is : general and environments.
 ; You can set any server env name that you want.
-; Servers must be `linux` or `postgres` type.
+; Servers must be `linux`, `postgres`, or `pgbouncer` type.
 ; Important: Pay attention having correct access rights on files you mention (cfr. SSH user being used).
 
 [general]
@@ -27,7 +27,7 @@ default_env = env2
 [env1]
 url = https://your-url1
 url_name =
-servers = serv1, serv2, serv3
+servers = serv1, serv2, serv3, pgb1
 
 [env2]
 url = https://your-url2
@@ -61,6 +61,18 @@ port =
 user =
 password =
 database =
+
+; PGBouncer section (optional) — monitors the PGBouncer connection pooler.
+; Connects to the pgbouncer admin database using psycopg (pg protocol).
+; The user must have access to run SHOW POOLS; SHOW STATS; SHOW CONFIG; on pgbouncer.
+[pgb1]
+type = pgbouncer
+name = PGBouncer
+host =
+port = 6432
+database = pgbouncer
+user =
+password =
 
 [serv4]
 type = linux
