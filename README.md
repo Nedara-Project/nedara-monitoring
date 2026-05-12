@@ -3,8 +3,7 @@
 A real-time monitoring dashboard for Linux servers, PostgreSQL databases, and PGBouncer connection poolers.
 
 <p>
-  <img src="./demo/nedara-monitoring-desktop.png" alt="Desktop dashboard" height="800">
-  <img src="./demo/nedara-monitoring-mobile.png" alt="Mobile view" height="800">
+  <img src="./demo/nedara-monitoring-desktop.png" alt="Desktop dashboard" height="1000">
 </p>
 
 ## Overview
