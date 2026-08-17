@@ -3,3 +3,4 @@ __pycache__/
 nedara_monitoring.db
 tmp/
 .venv
+.env

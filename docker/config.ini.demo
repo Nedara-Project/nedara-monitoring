@@ -1,0 +1,48 @@
+[general]
+port = 5000
+display_name = 
+refresh_rate = 1
+chart_history = 5000
+chart_adaptive_display = 1
+debug = 1
+secret_key = your-secret-app-key
+admin_enabled = 1
+admin_password = scrypt:32768:8:1$cQmCASNUhe25zNhp$1fdd2aaf34c15f82a7deb1522f8c300b535ec0021063b54476383a960cea98d39bc804c4bc5d9721a8a90b9e254b1e60fa0cbfe43186821d205dbff03b61da2d
+email_notif_smtp_server = maildev
+email_notif_smtp_port = 1025
+email_notif_login = 
+email_notif_password = 
+email_notif_recipients = recipient1@mail.com, recipient2@mail.com
+
+[environments]
+available_env = demo-env
+default_env = demo-env
+
+[demo-env]
+# tested by the monitoring app
+url = http://demo-server2/
+# reachable from the end-user browser (default to 'url')
+external_url = http://localhost/
+url_name = "Demo Webserver"
+servers = demo-server1, demo-db1
+send_emails = 1
+alert_delay_minutes = 0
+
+[demo-server1]
+type = linux
+name = "Demo Server 1 (App)"
+host = demo-server1
+port = 2222
+user = demo
+password = demo
+chart_label = demo-server1
+chart_color = #10b981
+
+[demo-db1]
+type = postgres
+name = "Demo Postgres 1"
+host = demo-db1
+port = 5432
+database = tpcc
+user = demo
+password = demo

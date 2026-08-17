@@ -1,0 +1,70 @@
+services:
+  app:
+    build: .
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - 5000:5000
+    volumes:
+      - ./config.ini:/usr/local/nedara-monitoring/config.ini
+    depends_on:
+      demo-db1:
+        condition: service_healthy
+    networks:
+      - demo
+
+  demo-server1:
+    image: lscr.io/linuxserver/openssh-server:latest
+    environment:
+      - PASSWORD_ACCESS=true
+      - USER_NAME=${APP_USER}
+      - USER_PASSWORD=${APP_PASSWORD}
+    networks:
+      - demo
+
+  demo-server2:
+    image: nginx:latest
+    ports:
+      - 80:80
+    networks:
+      - demo
+
+  demo-db1:
+    image: postgres:18.3-trixie
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - type: tmpfs
+        target: /var/lib/postgresql
+        tmpfs:
+          size: 12884901888
+    healthcheck:
+        test: ["CMD-SHELL", "PGPASSWORD=$${DB_PASSWORD}", "psql", "-U", "$${DB_USER}"]
+        interval: 2s
+        timeout: 6s
+        retries: 3
+    networks:
+      - demo
+
+  demo-pgbench1:
+    image: tpcorg/hammerdb:postgres
+    entrypoint: ["/bin/bash", "-c", "/home/HammerDB-6.0/scripts/tcl/postgres/tprocc/pg_tprocc.sh"]
+    volumes:
+      # DBHammer connection config
+      - ./docker/pg_tprocc_buildschema.tcl:/home/HammerDB-6.0/scripts/tcl/postgres/tprocc/pg_tprocc_buildschema.tcl:ro
+    depends_on:
+      demo-db1:
+        condition: service_healthy
+    networks:
+      - demo
+
+  maildev:
+    image: maildev/maildev
+    ports:
+      - 1080:1080
+    networks:
+      - demo
+
+networks:
+  demo:
