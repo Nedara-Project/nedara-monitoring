@@ -7,7 +7,6 @@ RUN apt-get update && apt-get -y install python3 python3-venv git pip libpq-dev
 
 RUN cd $(dirname ${HOME_DIR}) && git clone https://github.com/Nedara-Project/nedara-monitoring.git && cd nedara-monitoring && git submodule update --init --recursive
 
-# COPY ./config.ini.example .
 COPY ./docker/start-nedara-monitoring.sh /usr/local/bin/start-nedara-monitoring
 COPY ./requirements.txt .
 
