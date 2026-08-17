@@ -334,6 +334,7 @@ def get_environment_config(environment):
         raise ValueError(f"Invalid environment: {environment}")
     return {
         'url': config[environment].get('url', ''),
+        'external_url': config[environment].get('external_url', config[environment].get('url', '')),
         'url_name': config[environment].get('url_name', ''),
         'servers': [s.strip() for s in config[environment].get('servers', '').split(',') if s.strip()],
     }
@@ -465,6 +466,7 @@ def get_server_stats(server_config, environment='default'):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
             server_config['host'],
+            port=server_config.get('port',22),
             username=server_config['user'],
             password=server_config['password'],
             timeout=5,
@@ -615,6 +617,7 @@ def get_processes_stats(server_config):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
             server_config['host'],
+            port=server_config.get('port',22),
             username=server_config['user'],
             password=server_config['password'],
             timeout=5,
@@ -798,6 +801,9 @@ def collect_server_data(environment):
                 futures = [executor.submit(collect_one, name) for name in server_names]
                 for future in as_completed(futures, timeout=60):
                     try:
+                        r = future.result()
+                        if 'error' in r[next(iter(r.keys()))]:
+                            raise RuntimeError(r)
                         stats.update(future.result())
                     except Exception as e:
                         print(f"[{environment}] Error collecting server: {e}")
@@ -827,6 +833,7 @@ def collect_server_data(environment):
                 'stats': stats,
                 'web_status': web_status,
                 'web_url': env_config['url'],
+                'external_url': env_config.get('external_url', env_config['url']) ,
                 'web_url_name': env_config['url_name'],
                 'timestamp': datetime.now().strftime('%H:%M:%S'),
                 'environment': environment,
