@@ -1,0 +1,24 @@
+# Linux host for the demo environment, monitored over SSH.
+#
+# Debian based on purpose: the collector parses the output of GNU top, free and
+# df, which busybox (Alpine) formats differently.
+FROM debian:trixie-slim
+
+# Must match the [demo-server1] section of docker/config.ini.demo.
+ARG SSH_USER=demo
+ARG SSH_PASSWORD=demo
+ARG SSH_PORT=2222
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-server procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash "${SSH_USER}" \
+    && echo "${SSH_USER}:${SSH_PASSWORD}" | chpasswd \
+    && mkdir -p /run/sshd \
+    && ssh-keygen -A \
+    && printf 'Port %s\nPasswordAuthentication yes\nPermitRootLogin no\nUsePAM no\n' "${SSH_PORT}" \
+        > /etc/ssh/sshd_config.d/demo.conf
+
+EXPOSE 2222
+
+CMD ["/usr/sbin/sshd", "-D", "-e"]

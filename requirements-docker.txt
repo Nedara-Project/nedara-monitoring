@@ -1,0 +1,3 @@
+# Extra dependencies of the container image (see Dockerfile).
+-r requirements.txt
+gunicorn==26.1.0

@@ -1,70 +1,112 @@
+# Self-contained demo stack: the monitoring application plus a few services to
+# actually monitor. See the "Docker" section of the README.
+#
+#   cp docker/config.ini.demo config.ini
+#   docker compose up --build
+#
+# Dashboard: http://localhost:5000 — mail catcher: http://localhost:1080
+# (override APP_PORT / MAILDEV_PORT in .env if those ports are taken)
 services:
   app:
-    build: .
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    build:
+      context: .
+      args:
+        # Align the runtime user with the owner of ./config.ini, so the admin
+        # interface can save it (see the "Docker" section of the README).
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
     ports:
-      - 5000:5000
+      - "${APP_PORT:-5000}:5000"
     volumes:
+      # Bind mount, so the admin interface can write the configuration back.
+      # Copy docker/config.ini.demo to ./config.ini before the first start,
+      # otherwise Docker creates a directory here.
       - ./config.ini:/usr/local/nedara-monitoring/config.ini
+      # Chart history and mail lock files (NEDARA_DATA_DIR).
+      - monitoring-data:/var/lib/nedara-monitoring
     depends_on:
       demo-db1:
         condition: service_healthy
     networks:
       - demo
 
+  # Linux host monitored over SSH, on a non-default port to exercise the
+  # "port" key of the [demo-server1] section.
   demo-server1:
-    image: lscr.io/linuxserver/openssh-server:latest
-    environment:
-      - PASSWORD_ACCESS=true
-      - USER_NAME=${APP_USER}
-      - USER_PASSWORD=${APP_PASSWORD}
+    build:
+      context: docker
+      dockerfile: Dockerfile.demo-server
     networks:
       - demo
 
+  # Web application probed by the environment health check.
   demo-server2:
-    image: nginx:latest
+    image: nginx:1.29-alpine
     ports:
-      - 80:80
+      - "8080:80"
     networks:
       - demo
 
   demo-db1:
     image: postgres:18.3-trixie
     environment:
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      # Must match the [demo-db1] section of docker/config.ini.demo.
+      - POSTGRES_USER=demo
+      - POSTGRES_PASSWORD=demo
+      - POSTGRES_DB=demo
     volumes:
+      # The demo database is disposable: keep it in RAM and out of the way.
       - type: tmpfs
         target: /var/lib/postgresql
         tmpfs:
-          size: 12884901888
+          size: 2147483648
     healthcheck:
-        test: ["CMD-SHELL", "PGPASSWORD=$${DB_PASSWORD}", "psql", "-U", "$${DB_USER}"]
-        interval: 2s
-        timeout: 6s
-        retries: 3
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
     networks:
       - demo
 
+  # Constant load on the demo database, so the PostgreSQL panel and the charts
+  # have something to show. pgbench ships with the postgres image: no extra
+  # image to pull and no third-party benchmark script to vendor.
   demo-pgbench1:
-    image: tpcorg/hammerdb:postgres
-    entrypoint: ["/bin/bash", "-c", "/home/HammerDB-6.0/scripts/tcl/postgres/tprocc/pg_tprocc.sh"]
-    volumes:
-      # DBHammer connection config
-      - ./docker/pg_tprocc_buildschema.tcl:/home/HammerDB-6.0/scripts/tcl/postgres/tprocc/pg_tprocc_buildschema.tcl:ro
+    image: postgres:18.3-trixie
+    command:
+      - /bin/bash
+      - -c
+      - >-
+        set -e;
+        pgbench --initialize --quiet --scale ${PGBENCH_SCALE:-10};
+        exec pgbench --client ${PGBENCH_CLIENTS:-4} --jobs 2
+        --time ${PGBENCH_DURATION_S:-3600} --progress 60
+    environment:
+      # Must match the [demo-db1] section of docker/config.ini.demo.
+      - PGHOST=demo-db1
+      - PGPORT=5432
+      - PGUSER=demo
+      - PGPASSWORD=demo
+      - PGDATABASE=demo
     depends_on:
       demo-db1:
         condition: service_healthy
+    # The load is rebuilt from scratch on every restart, which is fine for a
+    # disposable database and keeps the charts moving indefinitely.
+    restart: unless-stopped
     networks:
       - demo
 
+  # Catches the alert emails sent by the demo environment.
   maildev:
-    image: maildev/maildev
+    image: maildev/maildev:2.2.1
     ports:
-      - 1080:1080
+      - "${MAILDEV_PORT:-1080}:1080"
     networks:
       - demo
+
+volumes:
+  monitoring-data:
 
 networks:
   demo:

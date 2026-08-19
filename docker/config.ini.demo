@@ -1,17 +1,24 @@
+; Configuration of the demo stack (see docker-compose.yml).
+; Copy it as ./config.ini before the first "docker compose up".
+; Credentials are demo values: never reuse this file for a real deployment.
+
 [general]
 port = 5000
-display_name = 
+display_name = Nedara Monitoring (demo)
 refresh_rate = 1
 chart_history = 5000
 chart_adaptive_display = 1
-debug = 1
-secret_key = your-secret-app-key
+debug = 0
+secret_key = demo-secret-key-not-for-production
 admin_enabled = 1
-admin_password = scrypt:32768:8:1$cQmCASNUhe25zNhp$1fdd2aaf34c15f82a7deb1522f8c300b535ec0021063b54476383a960cea98d39bc804c4bc5d9721a8a90b9e254b1e60fa0cbfe43186821d205dbff03b61da2d
+; Hash of "demo1234" — the demo admin password, at http://localhost:5000/admin
+admin_password = scrypt:32768:8:1$lLDBhyITRAW9BmrK$2231096570a0e0c425dd1804225345b5dabfca1ee135d44df5443891b038f29f3bafcbf11460f63639cadea95fe080ac6c6ca880115ee689506a0bec90936de7
+; maildev catches everything it receives, without TLS nor authentication:
+; alert emails are readable at http://localhost:1080
 email_notif_smtp_server = maildev
 email_notif_smtp_port = 1025
-email_notif_login = 
-email_notif_password = 
+email_notif_login =
+email_notif_password =
 email_notif_recipients = recipient1@mail.com, recipient2@mail.com
 
 [environments]
@@ -19,30 +26,35 @@ available_env = demo-env
 default_env = demo-env
 
 [demo-env]
-# tested by the monitoring app
+; URL probed by the application, inside the compose network
 url = http://demo-server2/
-# reachable from the end-user browser (default to 'url')
-external_url = http://localhost/
-url_name = "Demo Webserver"
+; URL of the dashboard link, as reachable from the browser (defaults to "url")
+external_url = http://localhost:8080/
+url_name = Demo Webserver
 servers = demo-server1, demo-db1
 send_emails = 1
 alert_delay_minutes = 0
 
 [demo-server1]
 type = linux
-name = "Demo Server 1 (App)"
+name = Demo Server 1 (App)
 host = demo-server1
+; the container runs sshd on 2222
 port = 2222
 user = demo
 password = demo
+; a container reports its bind-mounted /etc files as extra mounts, which is
+; noise in the demo: on a real server this section lists the actual partitions
+show_mounts = 0
 chart_label = demo-server1
 chart_color = #10b981
 
 [demo-db1]
 type = postgres
-name = "Demo Postgres 1"
+name = Demo Postgres 1
 host = demo-db1
 port = 5432
-database = tpcc
+; loaded by the demo-pgbench1 service (pgbench)
+database = demo
 user = demo
 password = demo

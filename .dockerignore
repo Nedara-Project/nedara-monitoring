@@ -1,0 +1,15 @@
+.git
+.gitignore
+.dockerignore
+.env
+.env.example
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+config.ini
+nedara_monitoring.db
+tmp/
+demo/
+docker-compose.yml
+README.md

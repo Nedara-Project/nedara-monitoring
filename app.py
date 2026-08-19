@@ -53,7 +53,10 @@ socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*", max_d
 def inject_version():
     return {'version': VERSION}
 
-DATABASE = 'nedara_monitoring.db'
+# Writable directory for the chart history and the mail lock files. Defaults
+# to the application directory; point it to a volume when containerised.
+DATA_DIR = os.environ.get('NEDARA_DATA_DIR') or os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.path.join(DATA_DIR, 'nedara_monitoring.db')
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chart_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,7 +79,7 @@ CREATE TABLE IF NOT EXISTS chart_config (
 server_data_cache = {}    # {environment: data_dict}
 client_environments = {}  # {sid: environment}
 alert_pending = {}        # {(environment, alert_key): first_seen_datetime}
-TMP_DIR = os.path.join(os.path.dirname(__file__), "tmp")
+TMP_DIR = os.path.join(DATA_DIR, "tmp")
 os.makedirs(TMP_DIR, exist_ok=True)
 
 
@@ -245,8 +248,6 @@ def send_notification_mail(data, environment='default', alert_key=None):
             has_mail_config = (
                 general_config.get('email_notif_smtp_server') and
                 general_config.get('email_notif_smtp_port') and
-                general_config.get('email_notif_login') and
-                general_config.get('email_notif_password') and
                 general_config.get('email_notif_recipients')
             )
 
@@ -256,7 +257,7 @@ def send_notification_mail(data, environment='default', alert_key=None):
             recipients = [email.strip() for email in general_config['email_notif_recipients'].split(',')]
 
             msg = MIMEMultipart('alternative')
-            msg['From'] = general_config['email_notif_login']
+            msg['From'] = general_config.get('email_notif_login') or 'nedara-monitoring@localhost'
             msg['To'] = ', '.join(recipients)
             msg['Subject'] = data.get('subject')
             msg.attach(MIMEText(data.get('body', ''), 'html', 'utf-8'))
@@ -265,8 +266,14 @@ def send_notification_mail(data, environment='default', alert_key=None):
                 host=general_config['email_notif_smtp_server'],
                 port=int(general_config['email_notif_smtp_port']),
             ) as server:
-                server.starttls()
-                server.login(general_config['email_notif_login'], general_config['email_notif_password'])
+                server.ehlo()
+                if server.has_extn('starttls'):
+                    server.starttls()
+                    server.ehlo()
+                login = general_config.get('email_notif_login')
+                password = general_config.get('email_notif_password')
+                if login and password:
+                    server.login(login, password)
                 server.sendmail(msg['From'], recipients, msg.as_string())
 
             print(f"✅ Notification email sent: {data.get('subject')} -> {recipients}")
@@ -363,8 +370,6 @@ def get_widget_config(environment):
         'email_configured': bool(
             config['general'].get('email_notif_smtp_server') and
             config['general'].get('email_notif_smtp_port') and
-            config['general'].get('email_notif_login') and
-            config['general'].get('email_notif_password') and
             config['general'].get('email_notif_recipients')
         ),
     }
@@ -466,7 +471,7 @@ def get_server_stats(server_config, environment='default'):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
             server_config['host'],
-            port=server_config.get('port',22),
+            port=server_config.get('port', 22),
             username=server_config['user'],
             password=server_config['password'],
             timeout=5,
@@ -617,7 +622,7 @@ def get_processes_stats(server_config):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
             server_config['host'],
-            port=server_config.get('port',22),
+            port=server_config.get('port', 22),
             username=server_config['user'],
             password=server_config['password'],
             timeout=5,
@@ -779,6 +784,7 @@ def collect_server_data(environment):
             show_pgbouncer_panel = True
 
     prev_net_disk = {}  # {server_name: {rx, tx, dr, dw, ts}}
+    reported_errors = {}  # {server_name: last logged error message}
 
     while True:
         try:
@@ -801,12 +807,22 @@ def collect_server_data(environment):
                 futures = [executor.submit(collect_one, name) for name in server_names]
                 for future in as_completed(futures, timeout=60):
                     try:
-                        r = future.result()
-                        if 'error' in r[next(iter(r.keys()))]:
-                            raise RuntimeError(r)
-                        stats.update(future.result())
+                        result = future.result()
                     except Exception as e:
                         print(f"[{environment}] Error collecting server: {e}")
+                        continue
+                    # Collectors report soft errors inside their payload:
+                    # log every state change, but keep the payload so the
+                    # dashboard can flag the server as unreachable.
+                    for sn, payload in result.items():
+                        error = payload.get('error') if isinstance(payload, dict) else None
+                        if error:
+                            if reported_errors.get(sn) != error:
+                                print(f"[{environment}] {sn}: {error}")
+                                reported_errors[sn] = error
+                        elif reported_errors.pop(sn, None):
+                            print(f"[{environment}] {sn}: recovered")
+                    stats.update(result)
 
             # Compute network/disk rates from cumulative counters
             ts_now = time.time()
@@ -833,7 +849,7 @@ def collect_server_data(environment):
                 'stats': stats,
                 'web_status': web_status,
                 'web_url': env_config['url'],
-                'external_url': env_config.get('external_url', env_config['url']) ,
+                'external_url': env_config['external_url'],
                 'web_url_name': env_config['url_name'],
                 'timestamp': datetime.now().strftime('%H:%M:%S'),
                 'environment': environment,
@@ -1089,11 +1105,32 @@ def admin_save():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
-if __name__ == '__main__':
+_collectors_lock = threading.Lock()
+_collectors_started = False
+
+
+def start_collectors():
+    """Start one collection thread per environment. Safe to call twice."""
+    global _collectors_started
+    with _collectors_lock:
+        if _collectors_started:
+            return
+        _collectors_started = True
     for env in get_available_environments():
         t = threading.Thread(target=collect_server_data, args=(env,), daemon=True)
         t.start()
         print(f"Started collection thread for environment: {env}")
+
+
+# The __main__ block below never runs when the application is served by a WSGI
+# server (gunicorn, uwsgi, …), so collection has to be started on import too.
+# Set NEDARA_START_COLLECTORS=0 to import the module without collecting.
+if os.environ.get('NEDARA_START_COLLECTORS', '1') != '0':
+    start_collectors()
+
+
+if __name__ == '__main__':
+    start_collectors()
 
     socketio.run(
         app,

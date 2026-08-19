@@ -338,7 +338,7 @@ const Monitoring = Nedara.createWidget({
             const linkEl = document.getElementById('web-url-link-container');
             if (linkEl && data.web_url) {
                 const label = data.web_url_name || data.web_url;
-                linkEl.innerHTML = `<a href="${data.external_url}" target="_blank" class="web-url-link" title="${data.web_url}">🔗 ${label}</a>`;
+                linkEl.innerHTML = `<a href="${data.external_url || data.web_url}" target="_blank" class="web-url-link" title="${data.web_url}">🔗 ${label}</a>`;
             }
         }
 
