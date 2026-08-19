@@ -56,6 +56,8 @@ Nedara Monitoring is an open-source web application that collects metrics from y
 
 ## Installation
 
+> To run everything in containers instead, skip to [Docker](#docker).
+
 ### 1. Clone the repository
 
 ```bash
@@ -95,11 +97,52 @@ The dashboard is available at `http://localhost:5000` (or whatever port you set 
 Gunicorn is not required but provides better stability under load. If you choose to use it:
 
 ```bash
-pip install gunicorn eventlet
-gunicorn --worker-class eventlet -w 1 app:app -b 0.0.0.0:5000
+pip install gunicorn
+gunicorn app:app --worker-class gthread --workers 1 --threads 24 --bind 0.0.0.0:5000
 ```
 
-> Use exactly **1 worker** — Flask-SocketIO requires a single worker process. Use `eventlet` or `gevent` as the worker class.
+> Use exactly **1 worker** — Flask-SocketIO requires a single worker process, and the collection threads run inside it. The application uses SocketIO's `threading` async mode, so the multi-threaded `gthread` worker is the right class; the number of simultaneous dashboard clients is bounded by `--threads`.
+
+## Docker
+
+The image is built from the working directory, so the `nedarajs` submodule has to be checked out first (`git submodule update --init --recursive`, see [step 1](#1-clone-the-repository)) — the build stops with an explicit error otherwise.
+
+### Demo stack
+
+The repository ships a self-contained demo environment: the application, an SSH host, a PostgreSQL database, a `pgbench` load generator (so the charts have something to show) and a mail catcher.
+
+```bash
+cp docker/config.ini.demo config.ini
+docker compose up --build
+```
+
+| Service | URL | Notes |
+|---------|-----|-------|
+| Dashboard | `http://localhost:5000` | admin interface at `/admin`, password `demo1234` |
+| Monitored web app | `http://localhost:8080` | the nginx instance probed by the health check |
+| Mail catcher | `http://localhost:1080` | alert emails sent by the demo environment |
+
+Copy `.env.example` to `.env` to change the size of the generated load or the ports published on the host — `APP_PORT` and `MAILDEV_PORT`, useful when `5000` is already taken.
+
+Everything in the demo is disposable: all credentials are `demo` / `demo` and the database lives in a tmpfs.
+
+### Running the image on your own infrastructure
+
+`docker compose up` also starts the demo services. To run the application alone, build the image and mount your own configuration:
+
+```bash
+docker build -t nedara-monitoring .
+docker run -d --name nedara-monitoring \
+    -p 5000:5000 \
+    -v "$(pwd)/config.ini:/usr/local/nedara-monitoring/config.ini" \
+    -v nedara-monitoring-data:/var/lib/nedara-monitoring \
+    nedara-monitoring
+```
+
+- `config.ini` is bind-mounted so the admin interface can write it back. **It must exist before the first start**, otherwise Docker creates a directory in its place.
+- The named volume keeps the SQLite chart history and the email throttling state across container recreations (see `NEDARA_DATA_DIR`).
+- The container runs as uid 1000, which must own `config.ini` for the admin interface to be able to save it. If your user has a different uid, build with `--build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g)`; under rootless Docker, which maps the host owner to uid 0 inside the container, build with `--build-arg APP_UID=0 --build-arg APP_GID=0`.
+- The image serves the application with Gunicorn on port 5000. Put it behind the reverse proxy of your choice (see [Nginx reverse proxy](#nginx-reverse-proxy-optional)).
 
 ## Production Deployment
 
@@ -115,7 +158,7 @@ After=network.target
 [Service]
 User=youruser
 WorkingDirectory=/opt/nedara-monitoring
-ExecStart=/opt/nedara-monitoring/.venv/bin/gunicorn --worker-class eventlet -w 1 app:app -b 127.0.0.1:5000
+ExecStart=/opt/nedara-monitoring/.venv/bin/gunicorn app:app --worker-class gthread --workers 1 --threads 24 --bind 127.0.0.1:5000
 Restart=always
 RestartSec=5
 SyslogIdentifier=nedara-monitoring
@@ -236,9 +279,9 @@ Alternatively, enable the [Admin interface](#admin-interface) to configure every
 | `admin_enabled` | `1` to enable the `/admin` interface, `0` to disable it (default: `0`) |
 | `admin_password` | Werkzeug password hash (see [Admin interface](#admin-interface)) |
 | `email_notif_smtp_server` | SMTP host for alert emails |
-| `email_notif_smtp_port` | SMTP port (e.g. `587` for STARTTLS) |
-| `email_notif_login` | SMTP username |
-| `email_notif_password` | SMTP password |
+| `email_notif_smtp_port` | SMTP port (e.g. `587`) — STARTTLS is used when the server advertises it |
+| `email_notif_login` | SMTP username — leave empty for a relay that requires no authentication |
+| `email_notif_password` | SMTP password — leave empty for a relay that requires no authentication |
 | `email_notif_recipients` | Comma-separated list of recipient addresses |
 
 ### `[environments]`
@@ -254,6 +297,7 @@ default_env = production
 ```ini
 [production]
 url = https://your-app.com        ; URL checked for web application health
+external_url = https://app.local  ; optional: dashboard link, if different from url
 url_name = My App                 ; display label (optional)
 servers = app1, db1, pgb1         ; comma-separated list of server section names
 send_emails = 1                   ; set to 0 to disable all alerts for this environment
@@ -263,6 +307,7 @@ alert_delay_minutes = 0           ; wait N minutes before sending (0 = immediate
 | Key | Description |
 |-----|-------------|
 | `url` | URL to health-check (HTTP GET, status 200 = healthy) |
+| `external_url` | URL the dashboard link points to, when it differs from `url` — typically `url` is the address the application can reach, `external_url` the one the browser needs. Defaults to `url`. |
 | `url_name` | Display label shown next to the health indicator |
 | `servers` | Comma-separated list of server section names to monitor |
 | `send_emails` | `1` to send alerts (default), `0` to disable — useful for staging environments |
@@ -277,6 +322,7 @@ alert_delay_minutes = 0           ; wait N minutes before sending (0 = immediate
 type = linux
 name = App Server                 ; display name in the dashboard
 host = 192.168.1.10               ; SSH host
+port = 22                         ; optional: SSH port (default: 22)
 user = deploy                     ; SSH username
 password = secret                 ; SSH password
 log_file = /var/log/myapp/app.log ; optional: path to tail for the Logs button
@@ -418,6 +464,15 @@ database = pgbouncer
 user = postgres
 password = pgpassword
 ```
+
+### Environment variables
+
+Optional — everything else is configured in `config.ini`.
+
+| Variable | Description |
+|----------|-------------|
+| `NEDARA_DATA_DIR` | Directory holding the SQLite chart history and the email throttling state. Defaults to the application directory; the Docker image points it at `/var/lib/nedara-monitoring`. |
+| `NEDARA_START_COLLECTORS` | Set to `0` to import `app.py` without starting any collection thread. Unset (the default) starts one thread per environment, both with `python3 app.py` and behind a WSGI server. |
 
 ## Admin interface
 

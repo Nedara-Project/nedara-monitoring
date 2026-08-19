@@ -32,6 +32,8 @@ admin_password =
 
 ; ── Email notifications ──
 ; Leave all fields empty to disable email alerts.
+; login/password may be left empty for a relay that requires no authentication.
+; STARTTLS is used when the SMTP server advertises it.
 email_notif_smtp_server =
 email_notif_smtp_port =
 email_notif_login =
@@ -50,6 +52,10 @@ default_env = env2
 ; ──────────────────────────────────────────────────────────────
 [env1]
 url = https://your-url1
+; external_url: optional — URL used for the dashboard link when it differs from
+; the URL probed above (e.g. internal address for the check, public one for the
+; browser). Defaults to url.
+external_url =
 url_name =
 servers = serv1, serv2, serv3, pgb1
 ; send_emails: set to 0 to disable all email alerts for this environment (e.g. staging).
@@ -74,6 +80,8 @@ alert_delay_minutes = 0
 type = linux
 name =
 host =
+; port: optional — SSH port (default: 22)
+port = 22
 user =
 password =
 ; log_file: optional — path to a log file to tail (displayed via the "Logs" button)
