@@ -2,10 +2,11 @@
 
     <!-- Web App Status Card -->
     <template id="web-app-card">
-        <div class="dash-card">
+        <div class="dash-card" id="web-app-dash-card" data-severity="none">
             <div class="card-header">
                 <div class="status-indicator" id="web-url-status"></div>
                 <span class="card-title">Web Application</span>
+                <span class="card-alert-chip" id="web-alert-chip" style="display:none"></span>
             </div>
             <div class="metric-item">
                 <span class="metric-label">Status</span>
@@ -21,47 +22,62 @@
 
     <!-- Linux server metrics card -->
     <template id="linux-server">
-        <div class="dash-card server-card">
+        <div class="dash-card server-card" data-severity="{{severity}}" data-target-id="{{id}}">
             <div class="card-header">
                 <div class="status-indicator status-linux-server {{health_class}}" id="{{id}}" data-name="{{name}}"></div>
                 <span class="card-title">{{name}}</span>
-                {{#if logs}}<a href="#" class="logs-link open_logs" data-source="{{name}}">Logs</a>{{/if}}
+                {{#if has_alerts}}
+                <span class="card-alert-chip is-{{severity}}" title="{{alert_tooltip}}">{{alert_chip_text}}</span>
+                {{/if}}
+                {{#if has_logs}}<a href="#" class="logs-link open_logs" data-source="{{name}}">Logs</a>{{/if}}
             </div>
-            <div class="metric-bar-row">
+            <div class="metric-bar-row {{cpu_row_class}}">
                 <div class="metric-bar-header">
                     <span class="metric-label">CPU</span>
                     <span class="metric-value-sm {{cpu_value_class}}">{{cpu_usage}}%</span>
                 </div>
                 <div class="progress-bar">
-                    <div class="progress-value {{cpu_usage_class}}" style="width:{{cpu_usage}}%"></div>
+                    <div class="progress-value {{cpu_usage_class}}" style="width:{{cpu_bar_width}}%"></div>
                 </div>
             </div>
-            <div class="metric-bar-row">
+            <div class="metric-bar-row {{ram_row_class}}">
                 <div class="metric-bar-header">
                     <span class="metric-label">RAM</span>
                     <span class="metric-value-sm {{ram_value_class}}">{{ram_usage_percent}}%</span>
                 </div>
                 <div class="progress-bar">
-                    <div class="progress-value {{ram_usage_class}}" style="width:{{ram_usage_percent}}%"></div>
+                    <div class="progress-value {{ram_usage_class}}" style="width:{{ram_bar_width}}%"></div>
                 </div>
+                <div class="metric-detail">{{ram_used}} / {{ram_total}} MB used</div>
             </div>
-            <div class="metric-bar-row">
+            <div class="metric-bar-row {{storage_row_class}}">
                 <div class="metric-bar-header">
                     <span class="metric-label">Disk /</span>
                     <span class="metric-value-sm {{storage_value_class}}">{{storage_usage_percent}}%</span>
                 </div>
                 <div class="progress-bar">
-                    <div class="progress-value {{storage_usage_class}}" style="width:{{storage_usage_percent}}%"></div>
+                    <div class="progress-value {{storage_usage_class}}" style="width:{{storage_bar_width}}%"></div>
                 </div>
                 <div class="metric-detail">{{storage_used}} / {{storage_size}} — {{storage_available}} free</div>
+            </div>
+            <div class="metric-bar-row {{load_row_class}}">
+                <div class="metric-bar-header">
+                    <span class="metric-label">Load 1m</span>
+                    <span class="metric-value-sm {{load_value_class}}">{{load_avg}}</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-value {{load_usage_class}}" style="width:{{load_bar_width}}%"></div>
+                </div>
+                <div class="metric-detail">{{load_per_core}} per core — {{cpu_cores}} core(s)</div>
             </div>
             {{#if mounts.length}}
             <div class="mounts-section">
                 <div class="mounts-header">
                     <span class="metric-label">Volumes</span>
+                    {{#subif mounts_alert_text}}<span class="metric-flag {{mounts_alert_class}}">{{mounts_alert_text}}</span>{{/subif}}
                 </div>
                 {{#mounts}}
-                <div class="mount-item">
+                <div class="mount-item {{row_class}}">
                     <div class="metric-bar-header">
                         <span class="mount-point" title="{{mountpoint}}">{{mountpoint}}</span>
                         <span class="metric-value-sm {{percent_value_class}}">{{percent}}%</span>
@@ -79,12 +95,14 @@
 
     <!-- Unreachable server card -->
     <template id="linux-server-unreachable">
-        <div class="dash-card server-card server-card-unreachable">
+        <div class="dash-card server-card server-card-unreachable" data-severity="critical" data-target-id="{{id}}">
             <div class="card-header">
                 <div class="status-indicator status-critical" id="{{id}}" data-name="{{name}}"></div>
                 <span class="card-title">{{name}}</span>
+                <span class="card-alert-chip is-critical">Unreachable</span>
             </div>
             <div class="unreachable-message">Server unreachable</div>
+            {{#if error_detail}}<div class="unreachable-detail">{{error_detail}}</div>{{/if}}
         </div>
     </template>
 
@@ -93,14 +111,14 @@
         <div class="panel-heading">
             <div class="status-indicator status-healthy" id="postgres-status" data-name="postgres"></div>
             <span class="panel-title">PostgreSQL</span>
-            <button class="panel-expand-btn" data-panel="postgres" title="Fullscreen">⤢</button>
+            <button class="panel-expand-btn panel-spacer" data-panel="postgres" title="Fullscreen">⤢</button>
         </div>
         <div class="stats-grid">
-            <div class="stat-item">Database <span id="main-db"></span></div>
-            <div class="stat-item">Active Queries <span id="query-count"></span></div>
-            <div class="stat-item">Avg Wait (Active) <span id="avg-wait-time-active"></span></div>
-            <div class="stat-item">Avg Wait (Idle) <span id="avg-wait-time-idle"></span></div>
-            <div class="stat-item col-span-2">Size (uncompressed) <span id="postgres-db-size"></span></div>
+            <div class="stat-item">Database <span id="main-db">—</span></div>
+            <div class="stat-item">Active Queries <span id="query-count">—</span></div>
+            <div class="stat-item" id="stat-wait-active">Avg Wait (Active) <span id="avg-wait-time-active">—</span></div>
+            <div class="stat-item" id="stat-wait-idle">Avg Wait (Idle) <span id="avg-wait-time-idle">—</span></div>
+            <div class="stat-item col-span-2">Size (uncompressed) <span id="postgres-db-size">—</span></div>
         </div>
         <div class="panel-filters">
             <button id="filter-active">Active</button>
@@ -144,9 +162,10 @@
     <!-- Processes panel -->
     <template id="processes-panel">
         <div class="panel-heading">
+            <i class="fa-solid fa-list-check panel-icon" aria-hidden="true"></i>
             <span class="panel-title">Processes</span>
-            <button class="panel-expand-btn" data-panel="processes" title="Fullscreen">⤢</button>
-            <select id="server-selector" class="filter-select" style="margin-left:auto">
+            <button class="panel-expand-btn panel-spacer" data-panel="processes" title="Fullscreen">⤢</button>
+            <select id="server-selector" class="filter-select">
                 <option value="all">All Servers</option>
             </select>
         </div>
@@ -172,15 +191,15 @@
         <div class="panel-heading">
             <div class="status-indicator status-healthy" id="pgbouncer-status"></div>
             <span class="panel-title">PGBouncer</span>
-            <button class="panel-expand-btn" data-panel="pgbouncer" title="Fullscreen">⤢</button>
+            <button class="panel-expand-btn panel-spacer" data-panel="pgbouncer" title="Fullscreen">⤢</button>
         </div>
         <div class="stats-grid">
             <div class="stat-item">Active Clients <span id="pgb-cl-active">—</span></div>
-            <div class="stat-item">Waiting <span id="pgb-cl-waiting">—</span></div>
+            <div class="stat-item" id="stat-pgb-waiting">Waiting <span id="pgb-cl-waiting">—</span></div>
             <div class="stat-item">Active Servers <span id="pgb-sv-active">—</span></div>
             <div class="stat-item">Idle Servers <span id="pgb-sv-idle">—</span></div>
             <div class="stat-item">Requests/s <span id="pgb-qps">—</span></div>
-            <div class="stat-item">Max Wait <span id="pgb-max-wait">—</span></div>
+            <div class="stat-item" id="stat-pgb-max-wait">Max Wait <span id="pgb-max-wait">—</span></div>
             <div class="stat-item">Avg Query <span id="pgb-avg-query">—</span></div>
             <div class="stat-item">Pool Size <span id="pgb-pool-size">—</span></div>
         </div>

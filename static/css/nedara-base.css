@@ -1,0 +1,127 @@
+/* ============================================================
+   DESIGN TOKENS
+   ============================================================ */
+
+:root {
+    --bg: #f1f5f9;
+    --bg-subtle: #f8fafc;
+    --card: #ffffff;
+    --card-alt: #f8fafc;
+    --border: rgba(226, 232, 240, 0.9);
+    --border-strong: #e2e8f0;
+    --border-hover: rgba(199, 210, 254, 0.6);
+    --text: #1e293b;
+    --text-strong: #0f172a;
+    --muted: #64748b;
+    --faint: #94a3b8;
+    --track: #e2e8f0;
+
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --accent-soft: rgba(99, 102, 241, 0.08);
+    --accent-ring: rgba(99, 102, 241, 0.3);
+
+    --ok: #059669;
+    --ok-dot: #10b981;
+    --ok-soft: rgba(16, 185, 129, 0.1);
+    --ok-border: rgba(16, 185, 129, 0.22);
+    --warn: #d97706;
+    --warn-dot: #f59e0b;
+    --warn-soft: rgba(245, 158, 11, 0.1);
+    --warn-border: rgba(245, 158, 11, 0.24);
+    --crit: #dc2626;
+    --crit-dot: #ef4444;
+    --crit-soft: rgba(239, 68, 68, 0.1);
+    --crit-border: rgba(239, 68, 68, 0.24);
+
+    /* Form surfaces: one step sunken, with a border firm enough to read */
+    --field-bg: #f8fafc;
+    --field-border: #aab6c5;
+    --field-border-hover: #7d8ca0;
+    --surface-sunken: #f1f5f9;
+
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+    --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.07), 0 0 0 1px rgba(99, 102, 241, 0.1);
+    --shadow-float: 0 25px 60px -12px rgba(0, 0, 0, 0.4);
+
+    --radius-card: 14px;
+    --radius-sm: 8px;
+    --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.dark {
+    --bg: #060c1a;
+    --bg-subtle: rgba(15, 23, 42, 0.5);
+    --card: rgba(15, 25, 50, 0.97);
+    --card-alt: rgba(15, 23, 42, 0.55);
+    --border: rgba(51, 65, 85, 0.45);
+    --border-strong: rgba(51, 65, 85, 0.65);
+    --border-hover: rgba(99, 102, 241, 0.22);
+    --text: #e2e8f0;
+    --text-strong: #f8fafc;
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --track: rgba(51, 65, 85, 0.5);
+
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-soft: rgba(99, 102, 241, 0.12);
+
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --crit: #f87171;
+
+    --field-bg: #020617;
+    --field-border: #52627a;
+    --field-border-hover: #6b7c94;
+    --surface-sunken: rgba(2, 6, 23, 0.4);
+
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    --shadow-hover: 0 4px 20px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(99, 102, 241, 0.18);
+    --shadow-float: 0 25px 60px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================================
+   SHARED PRIMITIVES (dashboard + admin)
+   ============================================================ */
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: var(--text);
+    background-color: var(--bg);
+    min-height: 100vh;
+    margin: 0;
+}
+
+/* Theme cycle button — present in every top bar */
+.btn-theme {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    font-size: 0.75rem; font-weight: 500; font-family: inherit;
+    height: 28px; padding: 0 0.6rem; min-width: 0;
+    cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-theme:hover {
+    background: var(--accent-soft); color: var(--accent);
+    border-color: var(--accent-ring);
+}
+
+/* Brand mark */
+.brand-logo {
+    width: 30px; height: 30px; flex-shrink: 0;
+    border-radius: 9px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #ffffff;
+    font-size: 0.875rem; font-weight: 800; letter-spacing: -0.03em;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(99, 102, 241, 0.35);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; }

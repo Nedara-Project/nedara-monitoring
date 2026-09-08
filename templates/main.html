@@ -33,18 +33,19 @@
         <!-- Sticky top bar -->
         <header id="topbar">
             <div class="topbar-brand">
-                <div id="status-badge">
+                <div class="brand-logo" aria-hidden="true">N</div>
+                <h1 id="app-title">{{ display_name }}</h1>
+                <div id="status-badge" title="Overall status">
                     <div class="status-indicator status-healthy" id="overall-status"></div>
                     <span id="status-text">Operational</span>
                 </div>
-                <h1 id="app-title">{{ display_name }}</h1>
             </div>
             <div class="topbar-controls">
                 <span class="topbar-time">
                     Updated <span id="last-update-time">—</span>
                 </span>
                 <a href="#" id="refresh-interface" title="Refresh">↺</a>
-                <select id="environment-selector" class="filter-select">
+                <select id="environment-selector" class="filter-select" title="Environment">
                     {% for env in environments %}
                     <option value="{{ env }}">{{ env }}</option>
                     {% endfor %}
@@ -60,6 +61,27 @@
         <!-- Scrollable content -->
         <main id="dashboard-main">
 
+            <!-- Active alerts -->
+            <section class="dash-card" id="section-alerts" data-severity="none">
+                <div class="panel-heading alerts-heading">
+                    <i class="fa-solid fa-bell alerts-icon" aria-hidden="true"></i>
+                    <span class="panel-title">Active alerts</span>
+                    <span id="alerts-chips" class="alerts-chips"></span>
+                    <div class="alerts-toolbar">
+                        <select id="alerts-severity-filter" class="filter-select" title="Minimum severity shown">
+                            <option value="all">All severities</option>
+                            <option value="critical">Critical only</option>
+                        </select>
+                        <button id="alerts-toggle" class="panel-expand-btn" title="Collapse / expand">▾</button>
+                    </div>
+                </div>
+                <div id="alerts-empty">
+                    <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                    <span>No active alert — every monitored metric is below its threshold.</span>
+                </div>
+                <div id="alerts-list" class="alerts-list"></div>
+            </section>
+
             <!-- Server overview row -->
             <div id="section-servers">
                 <div id="web-app-card"></div>
@@ -69,27 +91,45 @@
             <!-- Charts grid (2 per row) -->
             <div id="section-charts">
                 <div class="dash-card chart-card" id="chart-panel-cpu">
-                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">CPU Usage %</span></div>
+                    <div class="chart-header">
+                        <span class="chart-title"><i class="fa-solid fa-microchip chart-icon-cpu" aria-hidden="true"></i> CPU Usage %</span>
+                        <button class="chart-expand-btn" title="Fullscreen">⤢</button>
+                    </div>
                     <div id="CPUChart" class="chart-inner"></div>
                 </div>
                 <div class="dash-card chart-card" id="chart-panel-http">
-                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">HTTP Requests</span></div>
+                    <div class="chart-header">
+                        <span class="chart-title"><i class="fa-solid fa-network-wired chart-icon-http" aria-hidden="true"></i> HTTP Requests</span>
+                        <button class="chart-expand-btn" title="Fullscreen">⤢</button>
+                    </div>
                     <div id="httpRequestsChart" class="chart-inner"></div>
                 </div>
                 <div class="dash-card chart-card" id="chart-panel-ram">
-                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">RAM Usage %</span></div>
+                    <div class="chart-header">
+                        <span class="chart-title"><i class="fa-solid fa-memory chart-icon-ram" aria-hidden="true"></i> RAM Usage %</span>
+                        <button class="chart-expand-btn" title="Fullscreen">⤢</button>
+                    </div>
                     <div id="RAMChart" class="chart-inner"></div>
                 </div>
                 <div class="dash-card chart-card" id="chart-panel-loadavg">
-                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">Load Average (1m)</span></div>
+                    <div class="chart-header">
+                        <span class="chart-title"><i class="fa-solid fa-chart-line chart-icon-load" aria-hidden="true"></i> Load Average (1m)</span>
+                        <button class="chart-expand-btn" title="Fullscreen">⤢</button>
+                    </div>
                     <div id="LoadAvgChart" class="chart-inner"></div>
                 </div>
                 <div class="dash-card chart-card" id="chart-panel-network">
-                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">Network (MB/s)</span></div>
+                    <div class="chart-header">
+                        <span class="chart-title"><i class="fa-solid fa-arrow-right-arrow-left chart-icon-network" aria-hidden="true"></i> Network (MB/s)</span>
+                        <button class="chart-expand-btn" title="Fullscreen">⤢</button>
+                    </div>
                     <div id="NetworkChart" class="chart-inner"></div>
                 </div>
                 <div class="dash-card chart-card" id="chart-panel-diskio">
-                    <div class="chart-header"><button class="chart-expand-btn" title="Fullscreen">⤢</button><span class="chart-title">Disk I/O (MB/s)</span></div>
+                    <div class="chart-header">
+                        <span class="chart-title"><i class="fa-solid fa-hard-drive chart-icon-disk" aria-hidden="true"></i> Disk I/O (MB/s)</span>
+                        <button class="chart-expand-btn" title="Fullscreen">⤢</button>
+                    </div>
                     <div id="DiskIOChart" class="chart-inner"></div>
                 </div>
             </div>

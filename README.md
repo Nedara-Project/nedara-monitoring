@@ -36,13 +36,21 @@ Nedara Monitoring is an open-source web application that collects metrics from y
   - Pause/Resume per chart
   - Fullscreen expand for each chart and panel
 - **Theme** — Auto / Light / Dark, respects OS preference, persists across sessions
+- **Threshold alerting** — every metric is compared to a configurable warning/critical threshold
+  - Precise alerts: each one names the server, the metric, the measured value, the threshold it crossed, how long it has been active and the underlying detail (which volume, which query, which pool)
+  - Alert panel at the top of the dashboard, sorted critical first, with a severity filter; clicking an alert jumps to the card it came from
+  - Alerting cards, metric rows and volumes are highlighted in place, so the cause is visible without reading the panel
+  - Thresholds resolve per scope: global `[thresholds]`, per environment, per server
+  - Debounced on both edges: an issue must hold for `alert_sustain_seconds` before it is raised and stay clear for `alert_clear_seconds` before it disappears — a single CPU spike between two polls never alerts
+  - Covers unreachable hosts (SSH, PostgreSQL, PGBouncer), HTTP errors and offline web applications, CPU, RAM, root disk, every mounted volume, load average per core, response time, longest active query, longest idle transaction, waiting PGBouncer clients and pool wait time
 - **Email notifications** via SMTP
-  - Sent when a server, PostgreSQL, or web application becomes unreachable
-  - Maximum one email per 15 minutes per incident (throttle)
+  - One email per collection cycle, grouping every alert that became notifiable, with the same values as the dashboard
+  - Throttled **per alert** — an alert about one server never masks an alert about another
+  - Escalation (warning → critical) notifies immediately, and a "resolved" email is sent when the incident clears
   - Per-environment toggle — disable alerts on staging while keeping them on production
-  - Configurable alert delay — wait N minutes before sending, to avoid alerts for transient outages
+  - Configurable alert delay, repeat interval and minimum severity
   - Mail indicator in the UI when email notifications are configured
-- **Web admin interface** at `/admin` — configure the application from the browser without touching `config.ini`
+- **Web admin interface** at `/admin` — configure the application from the browser without touching `config.ini`, in the same visual language as the dashboard (shared tokens, Auto/Light/Dark)
   - Password-protected (Werkzeug password hash stored in `config.ini`)
   - First-time setup wizard: set the password directly in the browser on first access
   - Can be disabled entirely by setting `admin_enabled = 0`
@@ -283,6 +291,52 @@ Alternatively, enable the [Admin interface](#admin-interface) to configure every
 | `email_notif_login` | SMTP username — leave empty for a relay that requires no authentication |
 | `email_notif_password` | SMTP password — leave empty for a relay that requires no authentication |
 | `email_notif_recipients` | Comma-separated list of recipient addresses |
+| `alert_email_min_severity` | Lowest severity that triggers an email: `critical` (default) or `warning`. Warnings always show on the dashboard. |
+| `alert_repeat_minutes` | Delay before the same, still-active alert is emailed again (default: `60`) |
+| `alert_resolved_emails` | `1` (default) to also email when an alert clears, `0` to stay quiet |
+| `alert_sustain_seconds` | How long an issue must hold before it is raised (default: `5`) |
+| `alert_clear_seconds` | How long a raised alert stays visible after the condition disappears (default: `15`) |
+
+> The five `alert_*` keys above can be repeated in an environment section to override them for that environment only.
+
+### `[thresholds]`
+
+Optional section. Every key is optional too — the built-in default applies when it is missing.
+A metric that reaches its `*_warning` value raises a warning, its `*_critical` value a critical alert.
+
+Thresholds resolve from the most specific scope to the least:
+
+```
+server section  >  environment section  >  [thresholds]  >  built-in default
+```
+
+so `cpu_critical = 98` inside `[app1]` only affects that server, and the same key inside
+`[production]` only affects that environment.
+
+| Key | Unit | Default | Applies to |
+|-----|------|---------|------------|
+| `cpu_warning` / `cpu_critical` | % | 70 / 90 | Linux server CPU usage |
+| `ram_warning` / `ram_critical` | % | 70 / 90 | Linux server RAM usage |
+| `disk_warning` / `disk_critical` | % | 70 / 90 | Root filesystem usage |
+| `mount_warning` / `mount_critical` | % | 70 / 90 | Each mounted volume other than `/` |
+| `load_warning` / `load_critical` | load per core | 1.5 / 3.0 | Load average (1m) ÷ CPU core count |
+| `response_time_warning` / `response_time_critical` | ms | 1000 / 5000 | Web application response time |
+| `pg_active_wait_warning` / `pg_active_wait_critical` | s | 30 / 120 | Longest running active query |
+| `pg_idle_tx_warning` / `pg_idle_tx_critical` | s | 120 / 600 | Longest `idle in transaction` |
+| `pgb_waiting_warning` / `pgb_waiting_critical` | count | 1 / 5 | Waiting PGBouncer client connections |
+| `pgb_maxwait_warning` / `pgb_maxwait_critical` | s | 1 / 5 | Longest PGBouncer client wait |
+
+```ini
+[thresholds]
+cpu_warning = 70
+cpu_critical = 90
+ram_warning = 75
+ram_critical = 92
+disk_warning = 80
+disk_critical = 90
+```
+
+Unreachable hosts, HTTP errors and offline web applications are always critical — they have no threshold.
 
 ### `[environments]`
 
@@ -312,6 +366,8 @@ alert_delay_minutes = 0           ; wait N minutes before sending (0 = immediate
 | `servers` | Comma-separated list of server section names to monitor |
 | `send_emails` | `1` to send alerts (default), `0` to disable — useful for staging environments |
 | `alert_delay_minutes` | Minutes to wait before sending an alert email. If the issue resolves within the delay window, no email is sent. `0` = send immediately. |
+| `alert_repeat_minutes`, `alert_email_min_severity`, `alert_resolved_emails`, `alert_sustain_seconds`, `alert_clear_seconds` | Same meaning as in `[general]`, applied to this environment only |
+| any `[thresholds]` key | Overrides that threshold for every server of this environment |
 
 ### Server types
 
@@ -331,7 +387,22 @@ chart_label = App Server          ; label shown in charts (must be unique per en
 chart_color = #3b82f6             ; line color in charts (hex)
 ```
 
-> **SSH user requirements**: the user needs read access to `/proc/loadavg`, `/proc/net/dev`, `/proc/diskstats`, `/proc/meminfo`, and the ability to run `top`, `df`, `ps`. If `log_file` or `nginx_access_file` are set, the user also needs read access to those files.
+Any `[thresholds]` key can be added to a server section to override it for that server only:
+
+```ini
+[build1]
+type = linux
+name = Build Machine
+host = 10.0.3.10
+user = deploy
+password = secret
+chart_label = Build
+chart_color = #f59e0b
+cpu_warning = 90
+cpu_critical = 98
+```
+
+> **SSH user requirements**: the user needs read access to `/proc/loadavg`, `/proc/net/dev`, `/proc/diskstats`, `/proc/meminfo`, and the ability to run `top`, `df`, `ps`, `nproc`. If `log_file` or `nginx_access_file` are set, the user also needs read access to those files.
 
 #### `type = postgres` — PostgreSQL database
 
@@ -396,6 +467,19 @@ email_notif_smtp_port = 587
 email_notif_login = alerts@example.com
 email_notif_password = smtppassword
 email_notif_recipients = admin@example.com, ops@example.com
+alert_email_min_severity = critical
+alert_repeat_minutes = 60
+alert_resolved_emails = 1
+
+[thresholds]
+cpu_warning = 70
+cpu_critical = 90
+ram_warning = 75
+ram_critical = 92
+disk_warning = 80
+disk_critical = 90
+mount_warning = 80
+mount_critical = 92
 
 [environments]
 available_env = staging, production
@@ -509,7 +593,8 @@ admin_password = scrypt:32768:8:1$...   ; paste the full hash here
 | Tab | Settings |
 |-----|----------|
 | **General** | Display name, refresh rate, chart history, adaptive display, debug mode |
-| **Email** | SMTP server/port/login/password/recipients + per-environment `send_emails` toggle and `alert_delay_minutes` |
+| **Email** | SMTP server/port/login/password/recipients |
+| **Alerts** | Every warning/critical threshold, plus the per-environment notification behaviour (`send_emails`, delay, repeat interval, minimum severity, resolved emails, sustain/clear windows) |
 | **Servers** | Host, credentials, chart labels/colors, log file paths for each configured server |
 | **Admin** | Enable/disable the interface, change the admin password |
 
@@ -539,8 +624,13 @@ Set `admin_enabled = 0` (or remove the key). `/admin` will return a `403` immedi
 | requests | Web application health checks |
 | LightweightCharts (TradingView) | Interactive time-series charts (loaded from CDN) |
 | Socket.IO client | WebSocket client (loaded from CDN) |
-| Tailwind CSS | Layout utilities (loaded from CDN, Play mode) |
+| Inter + JetBrains Mono | Interface and numeric fonts (loaded from Google Fonts) |
+| Font Awesome | Interface icons (loaded from CDN) |
 | nedarajs | UI widget framework (git submodule) |
+
+The stylesheets are plain CSS, no build step: `static/css/nedara-base.css` holds the design
+tokens shared by every page, `monitoring.css` the dashboard and `admin.css` the configuration
+panel. Both pages read the same light/dark tokens, so the two interfaces stay visually in sync.
 
 > **Note on psycopg vs psycopg2**: This project uses `psycopg` (v3). If you are running Python < 3.9, switch to `psycopg2` — see [this commit](https://github.com/Nedara-Project/nedara-monitoring/commit/4491f85a1300a228393d9c5fb6f06b50cb7cc16e) for the required changes.
 

@@ -1,60 +1,38 @@
 {% extends 'base.html' %}
 
-{% block title %}Nedara Monitoring{% endblock %}
+{% block title %}Nedara Monitoring — Configuration{% endblock %}
 
-{% block head_extra %}
-<style>
-    /* Toggle slider — not achievable with pure Tailwind utilities */
-    .toggle-slider {
-        position: absolute; inset: 0;
-        background: #cbd5e1; border-radius: 9999px; cursor: pointer;
-        transition: background .2s;
-    }
-    .dark .toggle-slider { background: #334155; }
-    .toggle-slider::before {
-        content: ''; position: absolute;
-        height: 16px; width: 16px; left: 3px; bottom: 3px;
-        background: white; border-radius: 50%; transition: transform .2s;
-    }
-    input:checked + .toggle-slider { background: #6366f1; }
-    input:checked + .toggle-slider::before { transform: translateX(16px); }
-
-    /* Toast animation */
-    #toast {
-        transition: opacity .2s, transform .2s;
-        opacity: 0; transform: translateY(8px);
-    }
-    #toast.show { opacity: 1; transform: translateY(0); }
-
-    /* Tab underline active state */
-    .tab-btn { border-bottom: 2px solid transparent; }
-    .tab-btn.active { @apply text-indigo-500 border-indigo-500; }
-</style>
+{% block favicon %}
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
 {% endblock %}
 
-{% block body_class %}bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
 
 {% block body %}
 
 <!-- ─── TOPBAR ─── -->
-<header class="sticky top-0 z-50 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-6 h-14 backdrop-blur-sm">
-    <div class="flex items-center gap-3">
-        <span class="font-bold text-indigo-500 text-lg">⚙ Nedara Monitoring</span>
-        <span class="text-xs text-slate-400 dark:text-slate-500 font-medium">{% if state == 'admin' %}Configuration panel · {% endif %}v{{ version }}</span>
+<header id="admin-topbar">
+    <div class="topbar-brand">
+        <div class="brand-logo" aria-hidden="true">N</div>
+        <h1 class="topbar-title">Nedara Monitoring</h1>
+        {% if state == 'admin' %}
+        <span class="topbar-chip"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Configuration</span>
+        {% endif %}
     </div>
-    <div class="flex items-center gap-2">
+    <div class="topbar-controls">
+        <span class="topbar-version">v{{ version }}</span>
         <button id="theme-toggle" onclick="cycleTheme()" class="btn-theme" title="Cycle theme: Auto → Light → Dark">
             <span id="theme-icon">⊙</span>
             <span id="theme-label">Auto</span>
         </button>
         {% if state == 'admin' %}
-        <a href="/"
-           class="px-3 py-1.5 text-sm border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors no-underline">
-            Dashboard
+        <a href="/" class="btn" title="Back to the dashboard">
+            <i class="fa-solid fa-gauge-high" aria-hidden="true"></i><span class="btn-label">Dashboard</span>
         </a>
-        <a href="/admin/logout"
-           class="px-3 py-1.5 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors no-underline">
-            Logout
+        <a href="/admin/logout" class="btn btn-danger" title="Log out">
+            <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i><span class="btn-label">Logout</span>
         </a>
         {% endif %}
     </div>
@@ -63,42 +41,35 @@
 
 {% if state == 'setup' %}
 <!-- ═══════════════════════ FIRST TIME SETUP ═══════════════════════ -->
-<div class="min-h-[calc(100vh-56px)] flex items-center justify-center p-8">
-    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-10 w-full max-w-md">
-        <div class="text-4xl mb-4">🔐</div>
-        <h2 class="text-xl font-bold mb-1">First-time setup</h2>
-        <p class="text-sm text-slate-500 dark:text-slate-400 mb-7">Set a password to protect the admin interface.</p>
+<div class="auth-wrapper">
+    <div class="auth-card">
+        <div class="auth-icon"><i class="fa-solid fa-user-lock" aria-hidden="true"></i></div>
+        <h2 class="auth-title">First-time setup</h2>
+        <p class="auth-subtitle">Set a password to protect the admin interface.</p>
 
         {% if error %}
-        <div class="mb-5 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-sm text-red-600 dark:text-red-400">
-            {{ error }}
-        </div>
+        <div class="admin-error"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> {{ error }}</div>
         {% endif %}
 
-        <form method="POST" action="/admin/setup" class="space-y-4">
-            <div class="flex flex-col gap-1.5">
-                <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Password</label>
-                <input type="password" name="password" required minlength="6" placeholder="At least 6 characters" autofocus
-                       class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-slate-100">
+        <form method="POST" action="/admin/setup" class="auth-form">
+            <div class="field">
+                <label class="field-label" for="setup-password">Password</label>
+                <input class="field-input" id="setup-password" type="password" name="password" required minlength="6"
+                       placeholder="At least 6 characters" autofocus autocomplete="new-password">
             </div>
-            <div class="flex flex-col gap-1.5">
-                <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Confirm password</label>
-                <input type="password" name="confirm" required placeholder="Repeat password"
-                       class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-slate-100">
+            <div class="field">
+                <label class="field-label" for="setup-confirm">Confirm password</label>
+                <input class="field-input" id="setup-confirm" type="password" name="confirm" required
+                       placeholder="Repeat password" autocomplete="new-password">
             </div>
-            <button type="submit"
-                    class="w-full mt-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors">
-                Set password &amp; enter
-            </button>
+            <button type="submit" class="btn btn-primary btn-block">Set password &amp; enter</button>
         </form>
 
-        <div class="mt-6 p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-500 dark:text-slate-400 space-y-2">
-            <p class="font-semibold text-slate-700 dark:text-slate-300">CLI alternative</p>
-            <p>To set the hash directly in <code class="font-mono">config.ini</code>:</p>
-            <code class="block font-mono bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 break-all">
-                python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your_password'))"
-            </code>
-            <p>Then paste the output into: <code class="font-mono">[general] admin_password = &lt;hash&gt;</code></p>
+        <div class="auth-help">
+            <p class="auth-help-title">CLI alternative</p>
+            <p>To set the hash directly in <code>config.ini</code>:</p>
+            <code class="code-block">python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your_password'))"</code>
+            <p>Then paste the output into <code>[general] admin_password = &lt;hash&gt;</code></p>
         </div>
     </div>
 </div>
@@ -106,28 +77,23 @@
 
 {% elif state == 'login' %}
 <!-- ═══════════════════════ LOGIN ═══════════════════════ -->
-<div class="min-h-[calc(100vh-56px)] flex items-center justify-center p-8">
-    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-10 w-full max-w-md">
-        <div class="text-4xl mb-4">🔒</div>
-        <h2 class="text-xl font-bold mb-1">Admin login</h2>
-        <p class="text-sm text-slate-500 dark:text-slate-400 mb-7">Restricted access. Enter your admin password.</p>
+<div class="auth-wrapper">
+    <div class="auth-card">
+        <div class="auth-icon"><i class="fa-solid fa-lock" aria-hidden="true"></i></div>
+        <h2 class="auth-title">Admin login</h2>
+        <p class="auth-subtitle">Restricted access. Enter your admin password.</p>
 
         {% if error %}
-        <div class="mb-5 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-sm text-red-600 dark:text-red-400">
-            {{ error }}
-        </div>
+        <div class="admin-error"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> {{ error }}</div>
         {% endif %}
 
-        <form method="POST" action="/admin/login" class="space-y-4">
-            <div class="flex flex-col gap-1.5">
-                <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Password</label>
-                <input type="password" name="password" required autofocus
-                       class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-slate-100">
+        <form method="POST" action="/admin/login" class="auth-form">
+            <div class="field">
+                <label class="field-label" for="login-password">Password</label>
+                <input class="field-input" id="login-password" type="password" name="password" required autofocus
+                       autocomplete="current-password">
             </div>
-            <button type="submit"
-                    class="w-full mt-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors">
-                Sign in
-            </button>
+            <button type="submit" class="btn btn-primary btn-block">Sign in</button>
         </form>
     </div>
 </div>
@@ -135,128 +101,278 @@
 
 {% elif state == 'admin' %}
 <!-- ═══════════════════════ ADMIN PANEL ═══════════════════════ -->
-<div class="max-w-4xl mx-auto px-6 py-8">
+<div id="admin-actionbar">
+    <div class="actionbar-inner">
+        <div class="actionbar-text">
+            <span class="actionbar-title">Configuration</span>
+            <span class="actionbar-hint">Written straight to <code>config.ini</code>.</span>
+        </div>
+        <div class="actionbar-actions">
+            <button onclick="saveConfig()" class="btn btn-primary">
+                <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save changes
+            </button>
+        </div>
+    </div>
+</div>
 
-    <div class="mb-6 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-400">
-        Changes to environments, servers, or the port require an application <strong>restart</strong> to take effect. Email and general settings apply immediately.
+<main id="admin-main">
+
+    <div class="admin-notice">
+        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        <span>
+            Changes to environments, servers or the port require an application <strong>restart</strong>.
+            Everything else — general settings, email, thresholds and alert behaviour — applies on the next collection cycle.
+        </span>
     </div>
 
     <!-- Tabs -->
-    <div class="flex gap-1 border-b border-slate-200 dark:border-slate-800 mb-7">
-        <button class="tab-btn active px-4 py-2.5 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 mb-[-1px] transition-colors bg-transparent border-0 cursor-pointer"
-                onclick="showTab('general', this)">General</button>
-        <button class="tab-btn px-4 py-2.5 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 mb-[-1px] transition-colors bg-transparent border-0 cursor-pointer"
-                onclick="showTab('email', this)">Email</button>
-        <button class="tab-btn px-4 py-2.5 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 mb-[-1px] transition-colors bg-transparent border-0 cursor-pointer"
-                onclick="showTab('servers', this)">Servers</button>
-        <button class="tab-btn px-4 py-2.5 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 mb-[-1px] transition-colors bg-transparent border-0 cursor-pointer"
-                onclick="showTab('admin_settings', this)">Admin</button>
+    <div class="admin-tabs" role="tablist">
+        <button class="tab-btn active" onclick="showTab('general', this)">
+            <i class="fa-solid fa-gear" aria-hidden="true"></i> General
+        </button>
+        <button class="tab-btn" onclick="showTab('email', this)">
+            <i class="fa-solid fa-envelope" aria-hidden="true"></i> Email
+        </button>
+        <button class="tab-btn" onclick="showTab('alerts', this)">
+            <i class="fa-solid fa-bell" aria-hidden="true"></i> Alerts
+        </button>
+        <button class="tab-btn" onclick="showTab('servers', this)">
+            <i class="fa-solid fa-server" aria-hidden="true"></i> Servers
+        </button>
+        <button class="tab-btn" onclick="showTab('admin_settings', this)">
+            <i class="fa-solid fa-user-shield" aria-hidden="true"></i> Admin
+        </button>
     </div>
 
     <!-- ── TAB: GENERAL ── -->
-    <div id="tab-general" class="tab-pane">
-        <div class="mb-8">
-            <p class="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-2 mb-5">General settings</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Display name</label>
-                    <input type="text" id="display_name" value="{{ config.general.get('display_name', '') }}"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <div id="tab-general" class="tab-pane block">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-gear admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">General settings</span>
+            </div>
+            <div class="field-grid">
+                <div class="field">
+                    <label class="field-label" for="display_name">Display name</label>
+                    <input class="field-input" type="text" id="display_name" value="{{ config.general.get('display_name', '') }}">
+                    <span class="field-hint">Shown in the browser tab and the dashboard header.</span>
                 </div>
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Refresh interval (seconds)</label>
-                    <input type="number" id="refresh_rate" min="1" max="60" step="0.5" value="{{ config.general.get('refresh_rate', '1') }}"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="field">
+                    <label class="field-label" for="refresh_rate">Refresh interval (seconds)</label>
+                    <input class="field-input" type="number" id="refresh_rate" min="1" max="60" step="0.5"
+                           value="{{ config.general.get('refresh_rate', '1') }}">
+                    <span class="field-hint">Seconds between two collection cycles.</span>
                 </div>
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Chart history (max points per series)</label>
-                    <input type="number" id="chart_history" min="100" max="50000" step="100" value="{{ config.general.get('chart_history', '5000') }}"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="field">
+                    <label class="field-label" for="chart_history">Chart history (points per series)</label>
+                    <input class="field-input" type="number" id="chart_history" min="100" max="50000" step="100"
+                           value="{{ config.general.get('chart_history', '5000') }}">
                 </div>
-                <div class="flex flex-col gap-1.5 justify-end pb-1">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Chart adaptive display</label>
-                    <div class="flex items-center gap-3 mt-1">
-                        <label class="relative inline-block w-[38px] h-[22px] flex-shrink-0">
-                            <input type="checkbox" id="chart_adaptive_display" class="opacity-0 w-0 h-0"
+                <div class="field">
+                    <span class="field-label">Chart adaptive display</span>
+                    <div class="field-toggle">
+                        <label class="toggle">
+                            <input type="checkbox" id="chart_adaptive_display"
                                 {% if config.general.get('chart_adaptive_display', '0') == '1' %}checked{% endif %}>
                             <span class="toggle-slider"></span>
                         </label>
-                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable</span>
+                        <span class="toggle-text">Fit charts to the visible points</span>
                     </div>
                 </div>
-                <div class="flex flex-col gap-1.5 justify-end pb-1">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Flask debug mode</label>
-                    <div class="flex items-center gap-3 mt-1">
-                        <label class="relative inline-block w-[38px] h-[22px] flex-shrink-0">
-                            <input type="checkbox" id="debug" class="opacity-0 w-0 h-0"
+                <div class="field">
+                    <span class="field-label">Flask debug mode</span>
+                    <div class="field-toggle">
+                        <label class="toggle">
+                            <input type="checkbox" id="debug"
                                 {% if config.general.get('debug', '0') == '1' %}checked{% endif %}>
                             <span class="toggle-slider"></span>
                         </label>
-                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable</span>
+                        <span class="toggle-text">Enable</span>
                     </div>
+                    <span class="field-hint">Keep this off in production.</span>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- ── TAB: EMAIL ── -->
-    <div id="tab-email" class="tab-pane hidden">
-        <div class="mb-8">
-            <p class="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-2 mb-5">SMTP server</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">SMTP server</label>
-                    <input type="text" id="email_smtp_server" value="{{ config.general.get('email_notif_smtp_server', '') }}" placeholder="smtp.example.com"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <div id="tab-email" class="tab-pane">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-paper-plane admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">SMTP server</span>
+            </div>
+            <p class="admin-card-note">
+                Leave the server, port and recipients empty to disable email alerts entirely.
+                STARTTLS is used when the server advertises it; login and password may stay empty for an open relay.
+            </p>
+            <div class="field-grid">
+                <div class="field">
+                    <label class="field-label" for="email_smtp_server">SMTP server</label>
+                    <input class="field-input" type="text" id="email_smtp_server" placeholder="smtp.example.com"
+                           value="{{ config.general.get('email_notif_smtp_server', '') }}">
                 </div>
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">SMTP port</label>
-                    <input type="number" id="email_smtp_port" value="{{ config.general.get('email_notif_smtp_port', '587') }}" min="1" max="65535"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="field">
+                    <label class="field-label" for="email_smtp_port">SMTP port</label>
+                    <input class="field-input" type="number" id="email_smtp_port" min="1" max="65535"
+                           value="{{ config.general.get('email_notif_smtp_port', '587') }}">
                 </div>
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Sender address (login)</label>
-                    <input type="email" id="email_login" value="{{ config.general.get('email_notif_login', '') }}"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="field">
+                    <label class="field-label" for="email_login">Sender address (login)</label>
+                    <input class="field-input" type="email" id="email_login"
+                           value="{{ config.general.get('email_notif_login', '') }}">
                 </div>
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">SMTP password</label>
-                    <input type="password" id="email_password" placeholder="Leave empty to keep current"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <span class="text-xs text-slate-400 dark:text-slate-500">Leave blank to keep the existing password.</span>
+                <div class="field">
+                    <label class="field-label" for="email_password">SMTP password</label>
+                    <input class="field-input" type="password" id="email_password" placeholder="Leave empty to keep current"
+                           autocomplete="new-password">
+                    <span class="field-hint">Leave blank to keep the existing password.</span>
                 </div>
-                <div class="flex flex-col gap-1.5 sm:col-span-2">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Recipients (comma-separated)</label>
-                    <input type="text" id="email_recipients" value="{{ config.general.get('email_notif_recipients', '') }}" placeholder="a@example.com, b@example.com"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="field field-wide">
+                    <label class="field-label" for="email_recipients">Recipients (comma-separated)</label>
+                    <input class="field-input" type="text" id="email_recipients" placeholder="a@example.com, b@example.com"
+                           value="{{ config.general.get('email_notif_recipients', '') }}">
                 </div>
             </div>
         </div>
+    </div>
 
-        <div class="mb-8">
-            <p class="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-2 mb-5">Alerts per environment</p>
+    <!-- ── TAB: ALERTS ── -->
+    <div id="tab-alerts" class="tab-pane">
+
+        {% set threshold_groups = [
+            ('Server', 'fa-server', [
+                ('cpu', 'CPU usage', '%'),
+                ('ram', 'RAM usage', '%'),
+                ('disk', 'Disk usage (/)', '%'),
+                ('mount', 'Mounted volumes', '%'),
+                ('load', 'Load average per core', 'load / core')
+            ]),
+            ('Web application', 'fa-globe', [
+                ('response_time', 'Response time', 'ms')
+            ]),
+            ('PostgreSQL', 'fa-database', [
+                ('pg_active_wait', 'Longest active query', 's'),
+                ('pg_idle_tx', 'Longest idle transaction', 's')
+            ]),
+            ('PGBouncer', 'fa-diagram-project', [
+                ('pgb_waiting', 'Waiting client connections', 'count'),
+                ('pgb_maxwait', 'Longest client wait', 's')
+            ])
+        ] %}
+
+        {% for group_name, group_icon, metrics in threshold_groups %}
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid {{ group_icon }} admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">{{ group_name }} thresholds</span>
+            </div>
+            {% if loop.first %}
+            <p class="admin-card-note">
+                A metric that reaches its <strong>warning</strong> value raises a warning, its <strong>critical</strong> value
+                a critical alert. Leave a field empty to keep the default shown in grey. Values set here apply everywhere;
+                repeat the same key in an environment or server section of <code>config.ini</code> to override that scope.
+            </p>
+            {% endif %}
+            <div class="thr-head">
+                <span>Metric</span>
+                <span class="is-warning">Warning</span>
+                <span class="is-critical">Critical</span>
+            </div>
+            {% for key, label, unit in metrics %}
+            <div class="thr-row">
+                <span class="thr-metric">
+                    {{ label }}
+                    <span class="thr-unit">{{ unit }}</span>
+                </span>
+                <input type="number" step="any" min="0" class="thr-field field-input thr-input-warning"
+                       aria-label="{{ label }} warning threshold"
+                       data-field="{{ key }}_warning"
+                       value="{{ config.thresholds.get(key ~ '_warning', '') }}"
+                       placeholder="{{ default_thresholds.get(key ~ '_warning', '') }}">
+                <input type="number" step="any" min="0" class="thr-field field-input thr-input-critical"
+                       aria-label="{{ label }} critical threshold"
+                       data-field="{{ key }}_critical"
+                       value="{{ config.thresholds.get(key ~ '_critical', '') }}"
+                       placeholder="{{ default_thresholds.get(key ~ '_critical', '') }}">
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-bell admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Notifications per environment</span>
+            </div>
+            <p class="admin-card-note">
+                Unreachable hosts, HTTP errors and offline web applications are always critical — they have no threshold.
+                Every alert shows on the dashboard whatever these settings are; they only govern the emails.
+            </p>
             {% for env in environments %}
             {% set ecfg = config.environments.get(env, {}) %}
-            <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-5 mb-4">
-                <p class="font-bold text-indigo-500 text-sm mb-4">{{ env }}</p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Send email alerts</label>
-                        <div class="flex items-center gap-3 mt-1">
-                            <label class="relative inline-block w-[38px] h-[22px] flex-shrink-0">
-                                <input type="checkbox" class="env-send-emails opacity-0 w-0 h-0" data-env="{{ env }}"
+            <div class="admin-subcard">
+                <div class="admin-subcard-header">
+                    <span class="admin-subcard-title">{{ env }}</span>
+                    <span class="admin-subcard-key">environment</span>
+                </div>
+                <div class="field-grid">
+                    <div class="field">
+                        <span class="field-label">Send email alerts</span>
+                        <div class="field-toggle">
+                            <label class="toggle">
+                                <input type="checkbox" class="env-send-emails" data-env="{{ env }}"
                                     {% if ecfg.get('send_emails', '1') == '1' %}checked{% endif %}>
                                 <span class="toggle-slider"></span>
                             </label>
-                            <span class="text-sm text-slate-700 dark:text-slate-300">Enabled for {{ env }}</span>
+                            <span class="toggle-text">Enabled for {{ env }}</span>
                         </div>
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Alert delay (minutes)</label>
-                        <input type="number" class="env-alert-delay bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-env="{{ env }}" min="0" max="60" step="0.5"
-                               value="{{ ecfg.get('alert_delay_minutes', '0') }}" placeholder="0">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">0 = immediate. Example: 2 = waits 2 min before alerting (ignores brief outages).</span>
+                    <div class="field">
+                        <span class="field-label">Send "resolved" emails</span>
+                        <div class="field-toggle">
+                            <label class="toggle">
+                                <input type="checkbox" class="env-resolved-emails" data-env="{{ env }}"
+                                    {% if ecfg.get('alert_resolved_emails', '1') == '1' %}checked{% endif %}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-text">Notify when an alert clears</span>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Email from severity</label>
+                        <select class="env-min-severity field-input" data-env="{{ env }}">
+                            <option value="critical" {% if ecfg.get('alert_email_min_severity', 'critical') != 'warning' %}selected{% endif %}>Critical only</option>
+                            <option value="warning" {% if ecfg.get('alert_email_min_severity', 'critical') == 'warning' %}selected{% endif %}>Warning and critical</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Alert delay (minutes)</label>
+                        <input type="number" class="env-alert-delay field-input" data-env="{{ env }}"
+                               min="0" max="60" step="0.5" placeholder="0"
+                               value="{{ ecfg.get('alert_delay_minutes', '0') }}">
+                        <span class="field-hint">0 = immediate. Nothing is sent if the issue clears inside the delay.</span>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Repeat every (minutes)</label>
+                        <input type="number" class="env-alert-repeat field-input" data-env="{{ env }}"
+                               min="1" max="1440" step="1" placeholder="60"
+                               value="{{ ecfg.get('alert_repeat_minutes', '') }}">
+                        <span class="field-hint">Before the same, still-active alert is emailed again.</span>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Raise after / clear after (seconds)</label>
+                        <div style="display:flex; gap:0.5rem;">
+                            <input type="number" class="env-sustain field-input" data-env="{{ env }}"
+                                   min="0" max="600" step="1" placeholder="5"
+                                   aria-label="Raise after (seconds)"
+                                   value="{{ ecfg.get('alert_sustain_seconds', '') }}">
+                            <input type="number" class="env-clear field-input" data-env="{{ env }}"
+                                   min="0" max="600" step="1" placeholder="15"
+                                   aria-label="Clear after (seconds)"
+                                   value="{{ ecfg.get('alert_clear_seconds', '') }}">
+                        </div>
+                        <span class="field-hint">How long a metric must stay over — and back under — its threshold. Filters out single-sample spikes.</span>
                     </div>
                 </div>
             </div>
@@ -265,99 +381,102 @@
     </div>
 
     <!-- ── TAB: SERVERS ── -->
-    <div id="tab-servers" class="tab-pane hidden">
+    <div id="tab-servers" class="tab-pane">
         {% for env in environments %}
         {% set ecfg = config.environments.get(env, {}) %}
-        <div class="mb-8">
-            <p class="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-2 mb-5">Environment: {{ env }}</p>
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-layer-group admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Environment: {{ env }}</span>
+            </div>
 
             {% set server_names = ecfg.get('servers', '').split(',') %}
             {% for sname in server_names %}
             {% set sname = sname.strip() %}
             {% if sname and sname in config.servers %}
             {% set sc = config.servers[sname] %}
-            <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-5 mb-4">
-                <div class="flex items-center gap-3 mb-5">
+            <div class="admin-subcard">
+                <div class="admin-subcard-header">
                     {% if sc.get('type') == 'linux' %}
-                    <span class="px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400">linux</span>
+                    <span class="type-badge is-linux">linux</span>
                     {% elif sc.get('type') == 'postgres' %}
-                    <span class="px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">postgres</span>
+                    <span class="type-badge is-postgres">postgres</span>
                     {% elif sc.get('type') == 'pgbouncer' %}
-                    <span class="px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400">pgbouncer</span>
+                    <span class="type-badge is-pgbouncer">pgbouncer</span>
                     {% endif %}
-                    <span class="font-semibold text-sm">{{ sc.get('name', sname) }}</span>
-                    <span class="text-xs text-slate-400 dark:text-slate-500">— {{ sname }}</span>
+                    <span class="admin-subcard-title">{{ sc.get('name', sname) }}</span>
+                    <span class="admin-subcard-key">[{{ sname }}]</span>
                 </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Host / IP</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="host" value="{{ sc.get('host', '') }}">
+                <div class="field-grid">
+                    <div class="field">
+                        <label class="field-label">Host / IP</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="host"
+                               value="{{ sc.get('host', '') }}">
                     </div>
                     {% if sc.get('type') == 'linux' %}
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">SSH user</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="user" value="{{ sc.get('user', '') }}">
+                    <div class="field">
+                        <label class="field-label">SSH user</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="user"
+                               value="{{ sc.get('user', '') }}">
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">SSH password</label>
-                        <input type="password" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="password" placeholder="Leave empty to keep current">
+                    <div class="field">
+                        <label class="field-label">SSH password</label>
+                        <input type="password" class="srv-field field-input" data-srv="{{ sname }}" data-field="password"
+                               placeholder="Leave empty to keep current" autocomplete="new-password">
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Chart label</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="chart_label" value="{{ sc.get('chart_label', '') }}">
+                    <div class="field">
+                        <label class="field-label">Chart label</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="chart_label"
+                               value="{{ sc.get('chart_label', '') }}">
+                        <span class="field-hint">Must be unique inside the environment.</span>
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Chart color (hex)</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="chart_color" value="{{ sc.get('chart_color', '#6366f1') }}" placeholder="#6366f1">
+                    <div class="field">
+                        <label class="field-label">Chart color (hex)</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="chart_color"
+                               value="{{ sc.get('chart_color', '#6366f1') }}" placeholder="#6366f1">
                     </div>
-                    <div class="flex flex-col gap-1.5 sm:col-span-2">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Log file path (optional)</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="log_file" value="{{ sc.get('log_file', '') }}" placeholder="/var/log/app.log">
-                    </div>
-                    <div class="flex flex-col gap-1.5 sm:col-span-2">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Nginx access log path (optional)</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="nginx_access_file" value="{{ sc.get('nginx_access_file', '') }}" placeholder="/var/log/nginx/access.log">
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Show mounted volumes</label>
-                        <div class="flex items-center gap-3 mt-1">
-                            <label class="relative inline-block w-[38px] h-[22px] flex-shrink-0">
-                                <input type="checkbox" class="srv-toggle opacity-0 w-0 h-0"
-                                       data-srv="{{ sname }}" data-field="show_mounts"
-                                       {% if sc.get('show_mounts', '1') != '0' %}checked{% endif %}>
+                    <div class="field">
+                        <span class="field-label">Show mounted volumes</span>
+                        <div class="field-toggle">
+                            <label class="toggle">
+                                <input type="checkbox" class="srv-toggle" data-srv="{{ sname }}" data-field="show_mounts"
+                                    {% if sc.get('show_mounts', '1') != '0' %}checked{% endif %}>
                                 <span class="toggle-slider"></span>
                             </label>
-                            <span class="text-sm text-slate-700 dark:text-slate-300">Enabled</span>
+                            <span class="toggle-text">Enabled</span>
                         </div>
-                        <span class="text-xs text-slate-400 dark:text-slate-500">Display partitions other than / on the server card.</span>
+                        <span class="field-hint">Partitions other than / on the server card.</span>
+                    </div>
+                    <div class="field field-wide">
+                        <label class="field-label">Log file path (optional)</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="log_file"
+                               value="{{ sc.get('log_file', '') }}" placeholder="/var/log/app.log">
+                    </div>
+                    <div class="field field-wide">
+                        <label class="field-label">Nginx access log path (optional)</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="nginx_access_file"
+                               value="{{ sc.get('nginx_access_file', '') }}" placeholder="/var/log/nginx/access.log">
                     </div>
                     {% elif sc.get('type') == 'postgres' or sc.get('type') == 'pgbouncer' %}
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Port</label>
-                        <input type="number" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="port" value="{{ sc.get('port', '5432') }}">
+                    <div class="field">
+                        <label class="field-label">Port</label>
+                        <input type="number" class="srv-field field-input" data-srv="{{ sname }}" data-field="port"
+                               value="{{ sc.get('port', '5432') }}">
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">User</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="user" value="{{ sc.get('user', '') }}">
+                    <div class="field">
+                        <label class="field-label">User</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="user"
+                               value="{{ sc.get('user', '') }}">
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Password</label>
-                        <input type="password" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="password" placeholder="Leave empty to keep current">
+                    <div class="field">
+                        <label class="field-label">Password</label>
+                        <input type="password" class="srv-field field-input" data-srv="{{ sname }}" data-field="password"
+                               placeholder="Leave empty to keep current" autocomplete="new-password">
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Database</label>
-                        <input type="text" class="srv-field bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                               data-srv="{{ sname }}" data-field="database" value="{{ sc.get('database', '') }}">
+                    <div class="field">
+                        <label class="field-label">Database</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="database"
+                               value="{{ sc.get('database', '') }}">
                     </div>
                     {% endif %}
                 </div>
@@ -369,94 +488,87 @@
     </div>
 
     <!-- ── TAB: ADMIN SETTINGS ── -->
-    <div id="tab-admin_settings" class="tab-pane hidden">
-        <div class="mb-8">
-            <p class="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-2 mb-5">Admin interface</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Enable /admin interface</label>
-                    <div class="flex items-center gap-3 mt-1">
-                        <label class="relative inline-block w-[38px] h-[22px] flex-shrink-0">
-                            <input type="checkbox" id="admin_enabled" class="opacity-0 w-0 h-0"
+    <div id="tab-admin_settings" class="tab-pane">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-user-shield admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Admin interface</span>
+            </div>
+            <div class="field-grid">
+                <div class="field">
+                    <span class="field-label">Enable /admin interface</span>
+                    <div class="field-toggle">
+                        <label class="toggle">
+                            <input type="checkbox" id="admin_enabled"
                                 {% if config.general.get('admin_enabled', '0') == '1' %}checked{% endif %}>
                             <span class="toggle-slider"></span>
                         </label>
-                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable</span>
+                        <span class="toggle-text">Enable</span>
                     </div>
-                    <span class="text-xs text-slate-400 dark:text-slate-500">If disabled, /admin returns 403. Takes effect immediately — save first.</span>
+                    <span class="field-hint">Once disabled, /admin returns 403 immediately — save with care.</span>
                 </div>
             </div>
         </div>
 
-        <div class="mb-8">
-            <p class="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-2 mb-5">Change admin password</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Current password</label>
-                    <input type="password" id="pw_current" placeholder="Current password" autocomplete="current-password"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-key admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Change admin password</span>
+            </div>
+            <div class="field-grid">
+                <div class="field">
+                    <label class="field-label" for="pw_current">Current password</label>
+                    <input class="field-input" type="password" id="pw_current" placeholder="Current password"
+                           autocomplete="current-password">
                 </div>
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">New password</label>
-                    <input type="password" id="pw_new" placeholder="Leave empty to keep current" minlength="6" autocomplete="new-password"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="field">
+                    <label class="field-label" for="pw_new">New password</label>
+                    <input class="field-input" type="password" id="pw_new" placeholder="Leave empty to keep current"
+                           minlength="6" autocomplete="new-password">
                 </div>
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Confirm new password</label>
-                    <input type="password" id="pw_confirm" placeholder="Repeat new password" autocomplete="new-password"
-                           class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="field">
+                    <label class="field-label" for="pw_confirm">Confirm new password</label>
+                    <input class="field-input" type="password" id="pw_confirm" placeholder="Repeat new password"
+                           autocomplete="new-password">
                 </div>
             </div>
         </div>
 
-        <div class="mb-8">
-            <p class="text-xs font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-2 mb-5">Generate a password hash (CLI)</p>
-            <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
-                To set the password directly in <code class="font-mono text-xs">config.ini</code> without using this interface:
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-terminal admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Generate a password hash (CLI)</span>
+            </div>
+            <p class="admin-card-note">
+                To set the password directly in <code>config.ini</code> without this interface:
             </p>
-            <code class="block font-mono text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 break-all text-slate-700 dark:text-slate-300">
-                python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your_password'))"
-            </code>
-            <p class="text-xs text-slate-400 dark:text-slate-500 mt-3">
-                Paste the output into <code class="font-mono">config.ini</code>: <code class="font-mono">[general] admin_password = &lt;hash&gt;</code>
+            <code class="code-block">python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('your_password'))"</code>
+            <p class="admin-card-note" style="margin:0.75rem 0 0;">
+                Paste the output into <code>[general] admin_password = &lt;hash&gt;</code>
             </p>
         </div>
     </div>
 
-    <!-- Save bar -->
-    <div class="sticky bottom-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center gap-4 -mx-6 mt-4">
-        <button onclick="saveConfig()"
-                class="px-5 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
-            Save changes
-        </button>
-    </div>
-</div>
+</main>
 
 <!-- Toast -->
-<div id="toast" class="fixed bottom-20 right-6 px-5 py-3 rounded-xl text-sm font-medium shadow-2xl pointer-events-none z-50"></div>
+<div id="toast"></div>
 
 <script>
     function showTab(name, btn) {
-        document.querySelectorAll('.tab-pane').forEach(p => {
-            p.classList.add('hidden');
-            p.classList.remove('block');
-        });
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('block'));
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         const pane = document.getElementById('tab-' + name);
-        if (pane) { pane.classList.remove('hidden'); pane.classList.add('block'); }
+        if (pane) pane.classList.add('block');
         if (btn) btn.classList.add('active');
     }
-    document.getElementById('tab-general').classList.remove('hidden');
 
     function showToast(msg, type) {
         const t = document.getElementById('toast');
         t.textContent = msg;
-        t.className = 'fixed bottom-20 right-6 px-5 py-3 rounded-xl text-sm font-medium shadow-2xl pointer-events-none z-50 show '
-            + (type === 'success' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white');
+        t.className = 'show ' + (type === 'success' ? 'is-success' : 'is-error');
         clearTimeout(t._timer);
-        t._timer = setTimeout(() => {
-            t.className = 'fixed bottom-20 right-6 px-5 py-3 rounded-xl text-sm font-medium shadow-2xl pointer-events-none z-50';
-        }, 3500);
+        t._timer = setTimeout(() => { t.className = ''; }, 3500);
     }
 
     function saveConfig() {
@@ -468,30 +580,32 @@
         }
 
         const envData = {};
-        document.querySelectorAll('.env-send-emails').forEach(el => {
+        const setEnv = (el, field, value) => {
             const env = el.dataset.env;
             if (!envData[env]) envData[env] = {};
-            envData[env].send_emails = el.checked ? '1' : '0';
-        });
-        document.querySelectorAll('.env-alert-delay').forEach(el => {
-            const env = el.dataset.env;
-            if (!envData[env]) envData[env] = {};
-            envData[env].alert_delay_minutes = el.value || '0';
+            envData[env][field] = value;
+        };
+        document.querySelectorAll('.env-send-emails').forEach(el => setEnv(el, 'send_emails', el.checked ? '1' : '0'));
+        document.querySelectorAll('.env-resolved-emails').forEach(el => setEnv(el, 'alert_resolved_emails', el.checked ? '1' : '0'));
+        document.querySelectorAll('.env-alert-delay').forEach(el => setEnv(el, 'alert_delay_minutes', el.value || '0'));
+        document.querySelectorAll('.env-alert-repeat').forEach(el => setEnv(el, 'alert_repeat_minutes', el.value || '60'));
+        document.querySelectorAll('.env-min-severity').forEach(el => setEnv(el, 'alert_email_min_severity', el.value));
+        document.querySelectorAll('.env-sustain').forEach(el => setEnv(el, 'alert_sustain_seconds', el.value || '5'));
+        document.querySelectorAll('.env-clear').forEach(el => setEnv(el, 'alert_clear_seconds', el.value || '15'));
+
+        const thresholds = {};
+        document.querySelectorAll('.thr-field').forEach(el => {
+            thresholds[el.dataset.field] = el.value.trim();
         });
 
         const servers = {};
-        document.querySelectorAll('.srv-field').forEach(el => {
+        const setSrv = (el, value) => {
             const srv = el.dataset.srv;
-            const field = el.dataset.field;
             if (!servers[srv]) servers[srv] = {};
-            servers[srv][field] = el.value;
-        });
-        document.querySelectorAll('.srv-toggle').forEach(el => {
-            const srv = el.dataset.srv;
-            const field = el.dataset.field;
-            if (!servers[srv]) servers[srv] = {};
-            servers[srv][field] = el.checked ? '1' : '0';
-        });
+            servers[srv][el.dataset.field] = value;
+        };
+        document.querySelectorAll('.srv-field').forEach(el => setSrv(el, el.value));
+        document.querySelectorAll('.srv-toggle').forEach(el => setSrv(el, el.checked ? '1' : '0'));
 
         const payload = {
             general: {
@@ -509,6 +623,7 @@
                 email_notif_recipients: document.getElementById('email_recipients')?.value || '',
             },
             environments: envData,
+            thresholds: thresholds,
             servers: servers,
             admin: {
                 admin_enabled: document.getElementById('admin_enabled')?.checked ? '1' : '0',
@@ -518,6 +633,7 @@
         };
 
         const btn = document.querySelector('[onclick="saveConfig()"]');
+        const label = btn.innerHTML;
         btn.textContent = 'Saving…';
         btn.disabled = true;
 
@@ -528,7 +644,7 @@
         })
         .then(r => r.json())
         .then(data => {
-            btn.textContent = 'Save changes';
+            btn.innerHTML = label;
             btn.disabled = false;
             if (data.success) {
                 showToast('Saved successfully', 'success');
@@ -536,12 +652,13 @@
                     const el = document.getElementById(id);
                     if (el) el.value = '';
                 });
+                document.querySelectorAll('.srv-field[data-field="password"]').forEach(el => { el.value = ''; });
             } else {
                 showToast(data.message || 'Save failed', 'error');
             }
         })
         .catch(err => {
-            btn.textContent = 'Save changes';
+            btn.innerHTML = label;
             btn.disabled = false;
             showToast('Network error: ' + err.message, 'error');
         });

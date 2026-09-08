@@ -19,7 +19,7 @@ from flask import Flask, render_template, request, session, redirect, url_for, j
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.security import check_password_hash, generate_password_hash
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from contextlib import closing
 from email.mime.text import MIMEText
@@ -78,9 +78,41 @@ CREATE TABLE IF NOT EXISTS chart_config (
 
 server_data_cache = {}    # {environment: data_dict}
 client_environments = {}  # {sid: environment}
-alert_pending = {}        # {(environment, alert_key): first_seen_datetime}
+alert_state = {}          # {(environment, alert_key): state_dict}
+mail_backoff = {}         # {environment: epoch before which no send is retried}
 TMP_DIR = os.path.join(DATA_DIR, "tmp")
 os.makedirs(TMP_DIR, exist_ok=True)
+
+SEVERITY_ORDER = {'warning': 1, 'critical': 2}
+
+# Seconds to wait before retrying after an SMTP failure
+MAIL_RETRY_BACKOFF = 60.0
+
+# Alert thresholds. Every key below can be overridden globally in a
+# [thresholds] section, per environment (in the environment section) or per
+# server (in the server section) — the most specific value wins.
+DEFAULT_THRESHOLDS = {
+    'cpu_warning': 70.0,               # %
+    'cpu_critical': 90.0,
+    'ram_warning': 70.0,               # %
+    'ram_critical': 90.0,
+    'disk_warning': 70.0,              # % of the root filesystem
+    'disk_critical': 90.0,
+    'mount_warning': 70.0,             # % of any other mounted volume
+    'mount_critical': 90.0,
+    'load_warning': 1.5,               # load average (1m) per CPU core
+    'load_critical': 3.0,
+    'response_time_warning': 1000.0,   # ms — web application response time
+    'response_time_critical': 5000.0,
+    'pg_active_wait_warning': 30.0,    # s — longest running active query
+    'pg_active_wait_critical': 120.0,
+    'pg_idle_tx_warning': 120.0,       # s — longest "idle in transaction"
+    'pg_idle_tx_critical': 600.0,
+    'pgb_waiting_warning': 1.0,        # waiting client connections
+    'pgb_waiting_critical': 5.0,
+    'pgb_maxwait_warning': 1.0,        # s — longest client wait for a server
+    'pgb_maxwait_critical': 5.0,
+}
 
 
 def _reload_config():
@@ -98,29 +130,72 @@ def _is_send_emails_enabled(environment):
         return True
 
 
+def _env_float(environment, key, default):
+    """Read a numeric key from an environment section, falling back to [general]."""
+    for section in (environment, 'general'):
+        if section and section in config:
+            raw = (config[section].get(key) or '').strip()
+            if raw:
+                try:
+                    return float(raw)
+                except ValueError:
+                    pass
+    return default
+
+
 def _get_alert_delay(environment):
-    try:
-        return float(config[environment].get('alert_delay_minutes', '0'))
-    except Exception:
-        return 0.0
+    """Minutes an issue must persist before it is emailed."""
+    return _env_float(environment, 'alert_delay_minutes', 0.0)
 
 
-def _should_send_alert(environment, alert_key):
-    delay = _get_alert_delay(environment)
-    if delay <= 0:
-        return True
-    key = (environment, alert_key)
-    now = datetime.now()
-    if key not in alert_pending:
-        alert_pending[key] = now
-        return False
-    first_seen = alert_pending[key]
-    elapsed = now - first_seen
-    # Reset stale tracker (issue was gone long enough to be considered a new incident)
-    if elapsed > timedelta(minutes=max(delay * 5, 60)):
-        alert_pending[key] = now
-        return False
-    return elapsed >= timedelta(minutes=delay)
+def _get_alert_repeat(environment):
+    """Minutes before the same, still-active alert is emailed again."""
+    return _env_float(environment, 'alert_repeat_minutes', 60.0)
+
+
+def _get_alert_min_severity(environment):
+    """Lowest severity that triggers an email ('warning' or 'critical')."""
+    for section in (environment, 'general'):
+        if section in config:
+            raw = (config[section].get('alert_email_min_severity') or '').strip().lower()
+            if raw in SEVERITY_ORDER:
+                return raw
+    return 'critical'
+
+
+def _resolved_emails_enabled(environment):
+    for section in (environment, 'general'):
+        if section in config:
+            raw = (config[section].get('alert_resolved_emails') or '').strip()
+            if raw:
+                return raw == '1'
+    return True
+
+
+def _has_mail_config():
+    general_config = config['general']
+    return bool(
+        general_config.get('email_notif_smtp_server') and
+        general_config.get('email_notif_smtp_port') and
+        general_config.get('email_notif_recipients')
+    )
+
+
+def get_thresholds(environment=None, server_name=None):
+    """Resolve alert thresholds: defaults < [thresholds] < environment < server."""
+    values = dict(DEFAULT_THRESHOLDS)
+    for section in ('thresholds', environment, server_name):
+        if not section or section not in config:
+            continue
+        for key in DEFAULT_THRESHOLDS:
+            raw = (config[section].get(key) or '').strip()
+            if not raw:
+                continue
+            try:
+                values[key] = float(raw)
+            except ValueError:
+                pass
+    return values
 
 
 def _is_admin_enabled():
@@ -149,22 +224,112 @@ def connect_db():
     return sqlite3.connect(DATABASE)
 
 
-def _build_mail_body(title, description, details, environment):
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+def _fmt_duration(seconds):
+    seconds = int(max(0, seconds or 0))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60:02d}s"
+    hours, rest = divmod(seconds, 3600)
+    if hours < 24:
+        return f"{hours}h {rest // 60:02d}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours:02d}h"
+
+
+def _fmt_metric(value, unit):
+    """Human readable metric value, identical in the dashboard and in emails."""
+    if value is None:
+        return '—'
+    if unit == '%':
+        return f"{value:.1f}%"
+    if unit == 'ms':
+        return f"{value:.0f} ms"
+    if unit == 's':
+        return f"{value:.1f} s"
+    if unit == 'x':
+        return f"{value:.2f}"
+    if not unit:
+        return f"{value:g}"
+    return f"{value:g} {unit}"
+
+
+SEVERITY_COLORS = {
+    'critical': ('#ef4444', '#fef2f2', '#fecaca', '#b91c1c'),
+    'warning': ('#f59e0b', '#fffbeb', '#fde68a', '#b45309'),
+    'resolved': ('#10b981', '#ecfdf5', '#a7f3d0', '#047857'),
+}
+
+
+def _alert_mail_block(alert, resolved=False):
+    severity = 'resolved' if resolved else alert.get('severity', 'critical')
+    accent, bg, border, text = SEVERITY_COLORS.get(severity, SEVERITY_COLORS['critical'])
+    rows = {
+        'Server': alert.get('target', '—'),
+        'Metric': alert.get('label', '—'),
+    }
+    if alert.get('value') is not None:
+        rows['Last value' if resolved else 'Value'] = (
+            alert.get('value_display') or _fmt_metric(alert.get('value'), alert.get('unit', ''))
+        )
+    if alert.get('threshold') is not None:
+        rows['Threshold'] = alert.get('threshold_display') or _fmt_metric(alert.get('threshold'), alert.get('unit', ''))
+    rows['Duration'] = _fmt_duration(alert.get('duration'))
+    if alert.get('since'):
+        rows['Since'] = datetime.fromtimestamp(alert['since']).strftime('%Y-%m-%d %H:%M:%S')
+    if alert.get('detail'):
+        rows['Details'] = html.escape(str(alert['detail']))
+
     rows_html = ''.join(
         f"""<tr>
-              <td style="padding:6px 0;font-size:13px;color:#64748b;font-weight:500;width:130px;vertical-align:top;">{k}</td>
-              <td style="padding:6px 0;font-size:13px;color:#1e293b;vertical-align:top;word-break:break-all;">{v}</td>
+              <td style="padding:5px 0;font-size:12px;color:#64748b;font-weight:500;width:110px;vertical-align:top;">{k}</td>
+              <td style="padding:5px 0;font-size:12px;color:#1e293b;vertical-align:top;word-break:break-word;">{v}</td>
             </tr>"""
-        for k, v in details.items()
+        for k, v in rows.items()
     )
+    label = 'Resolved' if resolved else severity.upper()
+    return f"""<table width="100%" cellpadding="0" cellspacing="0" style="background:{bg};border:1px solid {border};border-radius:10px;margin-bottom:12px;">
+  <tr><td style="padding:14px 16px;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="font-size:11px;font-weight:700;color:{text};letter-spacing:0.06em;text-transform:uppercase;">{label}</td>
+        <td align="right" style="font-size:11px;color:#94a3b8;">{html.escape(str(alert.get('category', '')))}</td>
+      </tr>
+      <tr><td colspan="2" style="padding-top:4px;font-size:15px;font-weight:700;color:#0f172a;">
+        {html.escape(str(alert.get('title') or alert.get('message', '')))}
+      </td></tr>
+    </table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:2px 12px;">
+      <tr><td><table width="100%" cellpadding="0" cellspacing="0">{rows_html}</table></td></tr>
+    </table>
+  </td></tr>
+</table>"""
+
+
+def _build_alert_mail_body(alerts, environment, resolved=False):
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    worst = 'resolved' if resolved else (
+        'critical' if any(a.get('severity') == 'critical' for a in alerts) else 'warning'
+    )
+    accent = SEVERITY_COLORS[worst][0]
+    if resolved:
+        heading = 'Alert resolved' if len(alerts) == 1 else f'{len(alerts)} alerts resolved'
+        intro = 'The condition below is no longer detected. No action is required.'
+    else:
+        heading = 'Alert triggered' if len(alerts) == 1 else f'{len(alerts)} active alerts'
+        intro = (
+            'The following condition crossed its configured threshold and is still active.'
+            if len(alerts) == 1 else
+            'The following conditions crossed their configured thresholds and are still active.'
+        )
+    blocks = ''.join(_alert_mail_block(a, resolved=resolved) for a in alerts)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:32px 16px;">
     <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
 
         <!-- Header -->
         <tr><td style="background:#6366f1;border-radius:14px 14px 0 0;padding:24px 32px;">
@@ -172,36 +337,19 @@ def _build_mail_body(title, description, details, environment):
             <tr>
               <td>
                 <span style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.65);letter-spacing:0.08em;text-transform:uppercase;">Nedara Monitoring</span>
-                <div style="margin-top:6px;font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">{title}</div>
+                <div style="margin-top:6px;font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">{heading}</div>
               </td>
               <td align="right" style="vertical-align:top;">
-                <div style="width:14px;height:14px;background:#ef4444;border-radius:50%;box-shadow:0 0 0 4px rgba(239,68,68,0.3);margin-top:6px;"></div>
+                <div style="width:14px;height:14px;background:{accent};border-radius:50%;box-shadow:0 0 0 4px rgba(255,255,255,0.25);margin-top:6px;"></div>
               </td>
             </tr>
           </table>
         </td></tr>
 
         <!-- Body -->
-        <tr><td style="background:#ffffff;padding:28px 32px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-          <p style="margin:0 0 20px;font-size:15px;color:#1e293b;line-height:1.6;">{description}</p>
-
-          <!-- Details table -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:4px 16px;margin-bottom:24px;">
-            <tr><td>
-              <table width="100%" cellpadding="0" cellspacing="0">
-                {rows_html}
-              </table>
-            </td></tr>
-          </table>
-
-          <!-- Alert banner -->
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr><td style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;">
-              <span style="font-size:13px;color:#dc2626;font-weight:500;">
-                An automated alert has been triggered. Please investigate as soon as possible.
-              </span>
-            </td></tr>
-          </table>
+        <tr><td style="background:#ffffff;padding:24px 32px 8px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+          <p style="margin:0 0 18px;font-size:14px;color:#1e293b;line-height:1.6;">{intro}</p>
+          {blocks}
         </td></tr>
 
         <!-- Footer -->
@@ -209,7 +357,7 @@ def _build_mail_body(title, description, details, environment):
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
               <td style="font-size:12px;color:#94a3b8;">
-                Environment: <span style="font-weight:600;color:#6366f1;">{environment}</span>
+                Environment: <span style="font-weight:600;color:#6366f1;">{html.escape(str(environment))}</span>
               </td>
               <td align="right" style="font-size:12px;color:#94a3b8;">{now}</td>
             </tr>
@@ -223,73 +371,473 @@ def _build_mail_body(title, description, details, environment):
 </html>"""
 
 
-def send_notification_mail(data, environment='default', alert_key=None):
-    if not _is_send_emails_enabled(environment):
-        return False
+def _alert_mail_subject(alerts, environment, resolved=False):
+    targets = []
+    for a in alerts:
+        target = a.get('target')
+        if target and target not in targets:
+            targets.append(target)
+    if resolved:
+        if len(alerts) == 1:
+            a = alerts[0]
+            return (f"✅ Nedara Monitoring [{environment}] — Resolved: {a.get('target')} "
+                    f"{a.get('label')} (after {_fmt_duration(a.get('duration'))})")
+        return f"✅ Nedara Monitoring [{environment}] — {len(alerts)} alerts resolved: {', '.join(targets)}"
+    icon = '🔴' if any(a.get('severity') == 'critical' for a in alerts) else '🟠'
+    if len(alerts) == 1:
+        a = alerts[0]
+        value = a.get('value_display')
+        suffix = f" — {value}" if value and value != '—' else ''
+        return f"{icon} Nedara Monitoring [{environment}] — {a.get('target')}: {a.get('label')}{suffix}"
+    return f"{icon} Nedara Monitoring [{environment}] — {len(alerts)} active alerts: {', '.join(targets)}"
 
-    if alert_key and not _should_send_alert(environment, alert_key):
-        return False
 
+def _mail_state_load(state_file_path):
+    """Return {alert_key: last_sent_epoch}; tolerates the legacy state file."""
+    if not os.path.exists(state_file_path):
+        return {}
+    try:
+        with open(state_file_path, 'r') as f:
+            raw = f.read().strip()
+        if not raw:
+            return {}
+        if raw.startswith('{'):
+            return {k: float(v) for k, v in json.loads(raw).items()}
+        # Legacy format (a single ISO timestamp for the whole environment):
+        # throttling is now per alert key, so start from a clean state.
+        return {}
+    except Exception as e:
+        print(f"⚠️  Could not read mail state {state_file_path}: {e}")
+        return {}
+
+
+def _smtp_send(subject, body):
     general_config = config['general']
+    recipients = [
+        email.strip()
+        for email in general_config['email_notif_recipients'].split(',')
+        if email.strip()
+    ]
+    if not recipients:
+        return False
+
+    msg = MIMEMultipart('alternative')
+    msg['From'] = general_config.get('email_notif_login') or 'nedara-monitoring@localhost'
+    msg['To'] = ', '.join(recipients)
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body or '', 'html', 'utf-8'))
+
+    with smtplib.SMTP(
+        host=general_config['email_notif_smtp_server'],
+        port=int(general_config['email_notif_smtp_port']),
+    ) as server:
+        server.ehlo()
+        if server.has_extn('starttls'):
+            server.starttls()
+            server.ehlo()
+        login = general_config.get('email_notif_login')
+        password = general_config.get('email_notif_password')
+        if login and password:
+            server.login(login, password)
+        server.sendmail(msg['From'], recipients, msg.as_string())
+
+    print(f"✅ Notification email sent: {subject} -> {recipients}")
+    return True
+
+
+def send_alert_mails(environment, alerts, resolved=False):
+    """Email the given alerts as a single message.
+
+    Throttling is per alert key (an alert about one server never masks an
+    alert about another) and persisted on disk so that concurrent workers
+    share it. Returns the list of alert keys actually notified.
+    """
+    if not alerts or not _is_send_emails_enabled(environment) or not _has_mail_config():
+        return []
+
+    now = time.time()
+    # A failing SMTP server must not be retried on every collection cycle
+    if now < mail_backoff.get(environment, 0):
+        return []
+
+    repeat_seconds = max(_get_alert_repeat(environment), 0.0) * 60
     lock_file_path, state_file_path = _mail_files(environment)
 
     try:
         with open(lock_file_path, "w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-            last_sent = None
-            if os.path.exists(state_file_path):
-                with open(state_file_path, "r") as f:
-                    ts = f.read().strip()
-                    if ts:
-                        last_sent = datetime.fromisoformat(ts)
+            state = _mail_state_load(state_file_path)
+            to_send = []
+            for alert in alerts:
+                state_key = f"resolved:{alert['key']}" if resolved else alert['key']
+                last_sent = state.get(state_key)
+                if resolved or alert.get('escalated') or not last_sent:
+                    to_send.append(alert)
+                elif now - last_sent >= repeat_seconds:
+                    to_send.append(alert)
 
-            can_send = not last_sent or (datetime.now() - last_sent > timedelta(minutes=15))
-            has_mail_config = (
-                general_config.get('email_notif_smtp_server') and
-                general_config.get('email_notif_smtp_port') and
-                general_config.get('email_notif_recipients')
+            if not to_send:
+                return []
+
+            _smtp_send(
+                _alert_mail_subject(to_send, environment, resolved=resolved),
+                _build_alert_mail_body(to_send, environment, resolved=resolved),
             )
 
-            if not can_send or not has_mail_config:
-                return False
-
-            recipients = [email.strip() for email in general_config['email_notif_recipients'].split(',')]
-
-            msg = MIMEMultipart('alternative')
-            msg['From'] = general_config.get('email_notif_login') or 'nedara-monitoring@localhost'
-            msg['To'] = ', '.join(recipients)
-            msg['Subject'] = data.get('subject')
-            msg.attach(MIMEText(data.get('body', ''), 'html', 'utf-8'))
-
-            with smtplib.SMTP(
-                host=general_config['email_notif_smtp_server'],
-                port=int(general_config['email_notif_smtp_port']),
-            ) as server:
-                server.ehlo()
-                if server.has_extn('starttls'):
-                    server.starttls()
-                    server.ehlo()
-                login = general_config.get('email_notif_login')
-                password = general_config.get('email_notif_password')
-                if login and password:
-                    server.login(login, password)
-                server.sendmail(msg['From'], recipients, msg.as_string())
-
-            print(f"✅ Notification email sent: {data.get('subject')} -> {recipients}")
+            for alert in to_send:
+                if resolved:
+                    # A resolved incident starts over: drop its throttle entry.
+                    state.pop(alert['key'], None)
+                    state[f"resolved:{alert['key']}"] = now
+                else:
+                    state[alert['key']] = now
+                    state.pop(f"resolved:{alert['key']}", None)
 
             with open(state_file_path, "w") as f:
-                f.write(datetime.now().isoformat())
+                json.dump(state, f)
 
-            # Clear pending alert so the delay applies fresh on next incident
-            if alert_key:
-                alert_pending.pop((environment, alert_key), None)
-
-            return True
+            return [alert['key'] for alert in to_send]
 
     except Exception as e:
-        print(f"❌ Error sending notification email: {e}")
-        return False
+        mail_backoff[environment] = time.time() + MAIL_RETRY_BACKOFF
+        print(f"❌ Error sending notification email: {e} "
+              f"(retrying in {int(MAIL_RETRY_BACKOFF)}s)")
+        return []
+
+
+# ──────────────────────────────────────────────────────────────
+# ALERT EVALUATION
+# ──────────────────────────────────────────────────────────────
+
+def _severity(value, warning, critical):
+    if value is None:
+        return None
+    if critical is not None and value >= critical:
+        return 'critical'
+    if warning is not None and value >= warning:
+        return 'warning'
+    return None
+
+
+def _to_float(value, default=None):
+    try:
+        if value is None or value == '':
+            return default
+        return float(str(value).strip().split()[0].replace(',', '.'))
+    except (TypeError, ValueError, IndexError):
+        return default
+
+
+def _make_alert(key, severity, category, scope, target, target_id, label,
+                message, value=None, threshold=None, unit='', detail='', title=None):
+    return {
+        'key': key,
+        'severity': severity,
+        'category': category,
+        'scope': scope,
+        'target': target,
+        'target_id': target_id,
+        'label': label,
+        'message': message,
+        'title': title or message,
+        'value': value,
+        'threshold': threshold,
+        'unit': unit,
+        'value_display': _fmt_metric(value, unit) if value is not None else '',
+        'threshold_display': _fmt_metric(threshold, unit) if threshold is not None else '',
+        'detail': detail,
+    }
+
+
+def _threshold_alert(key, category, scope, target, target_id, label, value,
+                     thresholds, warning_key, critical_key, unit='%', detail=''):
+    """Build an alert when `value` crosses its warning/critical threshold."""
+    value = _to_float(value)
+    if value is None:
+        return None
+    warning = thresholds.get(warning_key)
+    critical = thresholds.get(critical_key)
+    severity = _severity(value, warning, critical)
+    if not severity:
+        return None
+    threshold = critical if severity == 'critical' else warning
+    return _make_alert(
+        key=key, severity=severity, category=category, scope=scope,
+        target=target, target_id=target_id, label=label,
+        message=(f"{label} is {_fmt_metric(value, unit)} "
+                 f"(≥ {severity} threshold {_fmt_metric(threshold, unit)})"),
+        title=f"{target} — {label} {_fmt_metric(value, unit)}",
+        value=value, threshold=threshold, unit=unit, detail=detail,
+    )
+
+
+def evaluate_alerts(environment, data):
+    """Turn a collection payload into a list of precise, targeted alerts."""
+    alerts = []
+    stats = data.get('stats') or {}
+    env_thresholds = get_thresholds(environment)
+
+    # ── Web application ──
+    web_status = data.get('web_status') or {}
+    web_url = data.get('web_url') or ''
+    web_name = data.get('web_url_name') or web_url or 'Web application'
+    status = web_status.get('status', '')
+    if status == 'Online':
+        alert = _threshold_alert(
+            key=f'web_response:{environment}', category='response_time', scope='web',
+            target=web_name, target_id='web-app-card', label='Response time',
+            value=_to_float(web_status.get('response_time')), thresholds=env_thresholds,
+            warning_key='response_time_warning', critical_key='response_time_critical',
+            unit='ms', detail=web_url,
+        )
+        if alert:
+            alerts.append(alert)
+    elif web_status.get('status_code') and status.startswith('Error'):
+        alerts.append(_make_alert(
+            key=f'web_error:{environment}', severity='critical', category='http',
+            scope='web', target=web_name, target_id='web-app-card', label='HTTP status',
+            message=f"The web application returned HTTP {web_status['status_code']}",
+            title=f"{web_name} — HTTP {web_status['status_code']}",
+            detail=web_url,
+        ))
+    else:
+        alerts.append(_make_alert(
+            key=f'web_offline:{environment}', severity='critical', category='offline',
+            scope='web', target=web_name, target_id='web-app-card', label='Availability',
+            message='The web application is unreachable (no response before timeout)',
+            title=f"{web_name} — offline",
+            detail=web_status.get('error') or web_url,
+        ))
+
+    # ── Servers and services ──
+    for server_key, server in stats.items():
+        if not isinstance(server, dict) or server_key.endswith('_processes'):
+            continue
+        server_type = server.get('type')
+        name = server.get('name') or server.get('server') or server_key
+
+        if server_type == 'linux':
+            if server.get('error'):
+                alerts.append(_make_alert(
+                    key=f'ssh:{server_key}', severity='critical', category='unreachable',
+                    scope='server', target=name, target_id=server_key, label='SSH connection',
+                    message='The server is unreachable over SSH',
+                    title=f"{name} — unreachable",
+                    detail=str(server['error'])[:300],
+                ))
+                continue
+
+            thresholds = get_thresholds(environment, server_key)
+            candidates = [
+                _threshold_alert(
+                    f'cpu:{server_key}', 'cpu', 'server', name, server_key, 'CPU usage',
+                    server.get('cpu_usage'), thresholds, 'cpu_warning', 'cpu_critical',
+                ),
+                _threshold_alert(
+                    f'ram:{server_key}', 'ram', 'server', name, server_key, 'RAM usage',
+                    server.get('ram_usage_percent'), thresholds, 'ram_warning', 'ram_critical',
+                    detail=f"{server.get('ram_used', '?')} MB used of {server.get('ram_total', '?')} MB",
+                ),
+                _threshold_alert(
+                    f'disk:{server_key}', 'disk', 'server', name, server_key, 'Disk usage (/)',
+                    server.get('storage_usage_percent'), thresholds, 'disk_warning', 'disk_critical',
+                    detail=(f"{server.get('storage_used', '?')} / {server.get('storage_size', '?')} used — "
+                            f"{server.get('storage_available', '?')} free"),
+                ),
+            ]
+
+            cores = _to_float(server.get('cpu_cores'), 1.0) or 1.0
+            load_avg = _to_float(server.get('load_avg'))
+            if load_avg is not None:
+                candidates.append(_threshold_alert(
+                    f'load:{server_key}', 'load', 'server', name, server_key,
+                    'Load average per core', load_avg / cores, thresholds,
+                    'load_warning', 'load_critical', unit='x',
+                    detail=f"load average (1m) {load_avg:.2f} on {int(cores)} core(s)",
+                ))
+
+            for mount in server.get('mounts') or []:
+                candidates.append(_threshold_alert(
+                    f"mount:{server_key}:{mount.get('mountpoint')}", 'mount', 'server',
+                    name, server_key, f"Volume {mount.get('mountpoint')}",
+                    mount.get('percent'), thresholds, 'mount_warning', 'mount_critical',
+                    detail=(f"{mount.get('used', '?')} / {mount.get('size', '?')} used — "
+                            f"{mount.get('available', '?')} free"),
+                ))
+
+            alerts.extend([a for a in candidates if a])
+
+        elif server_type == 'postgres':
+            if server.get('error'):
+                alerts.append(_make_alert(
+                    key=f'postgres:{server_key}', severity='critical', category='unreachable',
+                    scope='postgres', target=name, target_id='postgres-panel',
+                    label='PostgreSQL connection',
+                    message='The PostgreSQL server is unreachable',
+                    title=f"{name} — PostgreSQL unreachable",
+                    detail=str(server['error'])[:300],
+                ))
+                continue
+
+            thresholds = get_thresholds(environment, server_key)
+            queries = server.get('active_queries') or []
+
+            def _longest(state):
+                rows = [q for q in queries if q[2] == state]
+                return max(rows, key=lambda q: q[6]) if rows else None
+
+            longest_active = _longest('active')
+            if longest_active:
+                alert = _threshold_alert(
+                    f'pg_active:{server_key}', 'query', 'postgres', name, 'postgres-panel',
+                    'Longest active query', longest_active[6], thresholds,
+                    'pg_active_wait_warning', 'pg_active_wait_critical', unit='s',
+                    detail=f"db {longest_active[0]} · user {longest_active[1]} · {longest_active[3][:200]}",
+                )
+                if alert:
+                    alerts.append(alert)
+
+            longest_idle = _longest('idle in transaction')
+            if longest_idle:
+                alert = _threshold_alert(
+                    f'pg_idle_tx:{server_key}', 'query', 'postgres', name, 'postgres-panel',
+                    'Longest idle transaction', longest_idle[6], thresholds,
+                    'pg_idle_tx_warning', 'pg_idle_tx_critical', unit='s',
+                    detail=f"db {longest_idle[0]} · user {longest_idle[1]} · {longest_idle[3][:200]}",
+                )
+                if alert:
+                    alerts.append(alert)
+
+        elif server_type == 'pgbouncer':
+            if server.get('error'):
+                alerts.append(_make_alert(
+                    key=f'pgbouncer:{server_key}', severity='critical', category='unreachable',
+                    scope='pgbouncer', target=name, target_id='pgbouncer-panel',
+                    label='PGBouncer connection',
+                    message='The PGBouncer admin interface is unreachable',
+                    title=f"{name} — PGBouncer unreachable",
+                    detail=str(server['error'])[:300],
+                ))
+                continue
+
+            thresholds = get_thresholds(environment, server_key)
+            waiting_pools = [
+                f"{p.get('database')}/{p.get('user')}"
+                for p in server.get('pools') or []
+                if _to_float(p.get('cl_waiting'), 0.0)
+            ]
+            candidates = [
+                _threshold_alert(
+                    f'pgb_waiting:{server_key}', 'pool', 'pgbouncer', name, 'pgbouncer-panel',
+                    'Waiting client connections', server.get('total_cl_waiting'), thresholds,
+                    'pgb_waiting_warning', 'pgb_waiting_critical', unit='',
+                    detail='pools: ' + (', '.join(waiting_pools) if waiting_pools else '—'),
+                ),
+                _threshold_alert(
+                    f'pgb_maxwait:{server_key}', 'pool', 'pgbouncer', name, 'pgbouncer-panel',
+                    'Longest client wait', server.get('max_wait'), thresholds,
+                    'pgb_maxwait_warning', 'pgb_maxwait_critical', unit='s',
+                    detail=f"pool size {server.get('default_pool_size', '?')}",
+                ),
+            ]
+            alerts.extend([a for a in candidates if a])
+
+    return alerts
+
+
+def process_alerts(environment, data):
+    """Track alert lifecycles, send the notifications and return live alerts.
+
+    An issue must hold for `alert_sustain_seconds` before it is raised, and a
+    raised alert only disappears once it has been clear for
+    `alert_clear_seconds`. This debouncing on both edges keeps a single noisy
+    sample (a CPU spike between two polls) out of the alert list and out of
+    the mailbox.
+    """
+    now = time.time()
+    raw_alerts = {alert['key']: alert for alert in evaluate_alerts(environment, data)}
+    sustain_seconds = max(_env_float(environment, 'alert_sustain_seconds', 5.0), 0.0)
+    clear_seconds = max(_env_float(environment, 'alert_clear_seconds', 15.0), 0.0)
+    delay_seconds = max(_get_alert_delay(environment), 0.0) * 60
+    min_severity = SEVERITY_ORDER[_get_alert_min_severity(environment)]
+
+    active = []
+    for key, alert in raw_alerts.items():
+        state = alert_state.get((environment, key))
+        if state is None:
+            state = {
+                'first_seen': now, 'severity': alert['severity'],
+                'notified': False, 'active': False, 'clear_since': None,
+            }
+            alert_state[(environment, key)] = state
+        elif SEVERITY_ORDER[alert['severity']] > SEVERITY_ORDER[state['severity']]:
+            # warning → critical: notify again even inside the repeat window
+            state['escalated'] = True
+        state['severity'] = alert['severity']
+        state['snapshot'] = alert
+        state['clear_since'] = None
+        if not state['active'] and (now - state['first_seen']) >= sustain_seconds:
+            state['active'] = True
+
+        if state['active']:
+            alert['since'] = state['first_seen']
+            alert['duration'] = int(now - state['first_seen'])
+            alert['clearing'] = False
+            alert['notified'] = state['notified']
+            # An escalation is mailed immediately, even inside the repeat window
+            alert['escalated'] = state.get('escalated', False)
+            active.append(alert)
+
+    # Anything tracked but no longer reported is clearing, then resolved.
+    resolved = []
+    for (env, key), state in list(alert_state.items()):
+        if env != environment or key in raw_alerts:
+            continue
+        if not state['active']:
+            # Never held long enough to be raised: forget it.
+            alert_state.pop((env, key), None)
+            continue
+        if state['clear_since'] is None:
+            state['clear_since'] = now
+        if (now - state['clear_since']) >= clear_seconds:
+            if state.get('notified') and state.get('snapshot'):
+                snapshot = dict(state['snapshot'])
+                snapshot['duration'] = int(state['clear_since'] - state['first_seen'])
+                resolved.append(snapshot)
+            alert_state.pop((env, key), None)
+        else:
+            alert = dict(state['snapshot'])
+            alert['since'] = state['first_seen']
+            # Frozen at the moment the condition disappeared
+            alert['duration'] = int(state['clear_since'] - state['first_seen'])
+            alert['clearing'] = True
+            alert['notified'] = state['notified']
+            active.append(alert)
+
+    notifiable = [
+        alert for alert in active
+        if not alert['clearing']
+        and SEVERITY_ORDER[alert['severity']] >= min_severity
+        and (now - alert['since']) >= delay_seconds
+    ]
+    for key in send_alert_mails(environment, notifiable):
+        state = alert_state.get((environment, key))
+        if state:
+            state['notified'] = True
+            state['escalated'] = False
+    for alert in active:
+        state = alert_state.get((environment, alert['key']))
+        alert['notified'] = bool(state and state['notified'])
+        alert.pop('escalated', None)
+
+    if resolved and _resolved_emails_enabled(environment):
+        send_alert_mails(environment, resolved, resolved=True)
+
+    active.sort(key=lambda a: (
+        a['clearing'], -SEVERITY_ORDER[a['severity']], -a['duration'], a['target'] or '',
+    ))
+    return active
 
 
 def save_chart_data(chart_id, series_name, timestamp, value, environment):
@@ -367,11 +915,11 @@ def get_widget_config(environment):
         'chart_history': general_config.get('chart_history', '5000'),
         'chart_info': {},
         'chart_adaptive_display': general_config.get('chart_adaptive_display', '0') == '0',
-        'email_configured': bool(
-            config['general'].get('email_notif_smtp_server') and
-            config['general'].get('email_notif_smtp_port') and
-            config['general'].get('email_notif_recipients')
-        ),
+        'email_configured': _has_mail_config(),
+        'thresholds': get_thresholds(environment),
+        'alert_delay_minutes': _get_alert_delay(environment),
+        'alert_email_min_severity': _get_alert_min_severity(environment),
+        'emails_enabled': _is_send_emails_enabled(environment),
     }
     for server_name in env_config['servers']:
         server_config = get_server_config(server_name)
@@ -453,16 +1001,7 @@ def get_postgres_stats(postgres_config, environment='default'):
             'main_db': main_db,
         }
     except Exception as e:
-        send_notification_mail({
-            'subject': '⚠️ Nedara Monitoring — PostgreSQL Unreachable',
-            'body': _build_mail_body(
-                title='PostgreSQL Unreachable',
-                description='A connection to the PostgreSQL server could not be established. The database may be down or unreachable from the monitoring host.',
-                details={'Server': server_name, 'Environment': environment},
-                environment=environment,
-            ),
-        }, environment, alert_key=f'postgres_{server_name}')
-        return {'error': str(e), 'server': 'postgres', 'type': 'postgres'}
+        return {'error': str(e), 'server': 'postgres', 'name': server_name, 'type': 'postgres'}
 
 
 def get_server_stats(server_config, environment='default'):
@@ -523,9 +1062,12 @@ def get_server_stats(server_config, environment='default'):
             parts = stdout.read().decode().strip().split()
             http_requests = parts[0] if parts else '0'
 
-        # Load average (1-minute)
+        # Load average (1-minute) and CPU core count (to read it per core)
         stdin, stdout, stderr = ssh.exec_command("awk '{print $1}' /proc/loadavg")
         load_avg = stdout.read().decode().strip() or '0'
+
+        stdin, stdout, stderr = ssh.exec_command("nproc 2>/dev/null || echo 1")
+        cpu_cores = stdout.read().decode().strip() or '1'
 
         # Cumulative network bytes (all non-loopback interfaces)
         stdin, stdout, stderr = ssh.exec_command(
@@ -598,22 +1140,19 @@ def get_server_stats(server_config, environment='default'):
             'chart_label': server_config['chart_label'],
             'http_requests': http_requests,
             'load_avg': load_avg,
+            'cpu_cores': cpu_cores,
             'net_rx_bytes': net_rx_bytes,
             'net_tx_bytes': net_tx_bytes,
             'disk_read_bytes': disk_read_bytes,
             'disk_write_bytes': disk_write_bytes,
         }
     except Exception as e:
-        send_notification_mail({
-            'subject': '⚠️ Nedara Monitoring — SSH Unreachable',
-            'body': _build_mail_body(
-                title='SSH Unreachable',
-                description='An SSH connection to the server could not be established. The server may be down or the SSH service unavailable.',
-                details={'Server': server_config['name'], 'Environment': environment},
-                environment=environment,
-            ),
-        }, environment, alert_key=f'ssh_{server_config["name"]}')
-        return {'error': str(e), 'type': 'linux', 'server': server_config['name']}
+        return {
+            'error': str(e),
+            'type': 'linux',
+            'server': server_config['name'],
+            'name': server_config['name'],
+        }
 
 
 def get_processes_stats(server_config):
@@ -670,30 +1209,12 @@ def check_web_status(environment):
                 "response_time": f"{response_time:.2f} ms",
             }
         else:
-            send_notification_mail({
-                'subject': f'⚠️ Nedara Monitoring — Web App Error ({response.status_code})',
-                'body': _build_mail_body(
-                    title='Web Application Error',
-                    description=f'The web application returned an unexpected HTTP status code. This may indicate a server-side error or misconfiguration.',
-                    details={'URL': web_url, 'Status code': str(response.status_code), 'Environment': environment},
-                    environment=environment,
-                ),
-            }, environment, alert_key=f'web_error_{environment}')
             return {
                 "status": f"Error: {response.status_code}",
                 "status_code": response.status_code,
                 "response_time": "N/A",
             }
     except requests.exceptions.RequestException as e:
-        send_notification_mail({
-            'subject': '⚠️ Nedara Monitoring — Web App Offline',
-            'body': _build_mail_body(
-                title='Web Application Offline',
-                description='The web application appears to be offline or unreachable. No response was received within the timeout period.',
-                details={'URL': web_url, 'Environment': environment},
-                environment=environment,
-            ),
-        }, environment, alert_key=f'web_offline_{environment}')
         return {
             "status": "Offline",
             "status_code": 500,
@@ -801,6 +1322,10 @@ def collect_server_data(environment):
                     result[f"{server_name}_processes"] = get_processes_stats(sc)
                 elif server_type == 'pgbouncer':
                     result[server_name] = get_pgbouncer_stats(sc)
+                thresholds = get_thresholds(environment, server_name)
+                for key, payload in result.items():
+                    if isinstance(payload, dict) and not key.endswith('_processes'):
+                        payload['thresholds'] = thresholds
                 return result
 
             with ThreadPoolExecutor(max_workers=max(len(server_names), 1)) as executor:
@@ -857,6 +1382,13 @@ def collect_server_data(environment):
                 'show_postgres_panel': show_postgres_panel,
                 'show_http_requests_panel': show_http_requests_panel,
                 'show_pgbouncer_panel': show_pgbouncer_panel,
+            }
+
+            alerts = process_alerts(environment, data)
+            data['alerts'] = alerts
+            data['alert_summary'] = {
+                'critical': sum(1 for a in alerts if a['severity'] == 'critical'),
+                'warning': sum(1 for a in alerts if a['severity'] == 'warning'),
             }
 
             server_data_cache[environment] = data
@@ -980,6 +1512,7 @@ def admin_index():
         'general': dict(config['general']),
         'environments': {e: dict(config[e]) for e in envs if e in config},
         'servers': {},
+        'thresholds': dict(config['thresholds']) if 'thresholds' in config else {},
     }
     for e in envs:
         if e not in config:
@@ -988,7 +1521,10 @@ def admin_index():
             if sname in config:
                 cfg['servers'][sname] = dict(config[sname])
 
-    return render_template('admin.html', state='admin', config=cfg, environments=envs, error=None)
+    return render_template(
+        'admin.html', state='admin', config=cfg, environments=envs, error=None,
+        default_thresholds=DEFAULT_THRESHOLDS,
+    )
 
 
 @app.route('/admin/login', methods=['POST'])
@@ -1061,14 +1597,35 @@ def admin_save():
         if data.get('email', {}).get('email_notif_password', '').strip():
             config['general']['email_notif_password'] = data['email']['email_notif_password']
 
+        # Alert thresholds (an empty field falls back to the built-in default)
+        thresholds = {
+            field: str(value).strip()
+            for field, value in data.get('thresholds', {}).items()
+            if field in DEFAULT_THRESHOLDS
+        }
+        if any(thresholds.values()) and 'thresholds' not in config:
+            config.add_section('thresholds')
+        if 'thresholds' in config:
+            for field, value in thresholds.items():
+                if value:
+                    config['thresholds'][field] = value
+                else:
+                    config.remove_option('thresholds', field)
+            if not config.options('thresholds'):
+                config.remove_section('thresholds')
+
         # Per-environment settings
+        env_alert_fields = [
+            'send_emails', 'alert_delay_minutes', 'alert_repeat_minutes',
+            'alert_email_min_severity', 'alert_resolved_emails',
+            'alert_sustain_seconds', 'alert_clear_seconds',
+        ]
         for env, env_data in data.get('environments', {}).items():
             if env not in config:
                 continue
-            if 'send_emails' in env_data:
-                config[env]['send_emails'] = str(env_data['send_emails'])
-            if 'alert_delay_minutes' in env_data:
-                config[env]['alert_delay_minutes'] = str(env_data['alert_delay_minutes'])
+            for field in env_alert_fields:
+                if field in env_data:
+                    config[env][field] = str(env_data[field])
 
         # Server settings (credentials only — type/name/host changes need restart)
         for sname, sdata in data.get('servers', {}).items():

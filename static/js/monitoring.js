@@ -18,6 +18,10 @@ const Monitoring = Nedara.createWidget({
         'change #server-selector':       '_onServerSelectorChange',
         'click #refresh-interface':      '_onRefreshInterfaceBtnClick',
         'click #theme-toggle':           '_onThemeToggleClick',
+        'click #alerts-toggle':          '_onAlertsToggleClick',
+        'change #alerts-severity-filter': '_onAlertsSeverityFilterChange',
+        'click .alert-item':             '_onAlertItemClick',
+        'keydown .alert-item':           '_onAlertItemKeydown',
     },
 
     start: async function () {
@@ -32,10 +36,14 @@ const Monitoring = Nedara.createWidget({
         this.serverLogs     = {};
         this.openLogSource  = null;
         this.charts         = null;
+        this.alerts         = [];
+        this.alertsSeverityFilter = localStorage.getItem('nedara-alerts-severity') || 'all';
+        this.alertsCollapsed = localStorage.getItem('nedara-alerts-collapsed') === '1';
 
         this._loadingTimeout = setTimeout(() => this._showDashboard(), 15000);
 
         window.updateThemeButton(localStorage.getItem('nedara-theme') || 'auto');
+        this._restoreAlertsPanelState();
 
         new MutationObserver(() => this.updateChartThemes())
             .observe(document.documentElement, { attributeFilter: ['class'] });
@@ -120,6 +128,8 @@ const Monitoring = Nedara.createWidget({
                 self.env = data.environment;
                 document.getElementById('environment-selector').value = self.env;
                 self.resetCharts();
+                self.alerts = [];
+                self.renderAlerts({ alerts: [], alert_summary: { critical: 0, warning: 0 } });
                 document.getElementById('linux-servers-row').innerHTML = '';
                 const procTbody = document.querySelector('#processes-table tbody');
                 if (procTbody) procTbody.innerHTML = '';
@@ -185,7 +195,7 @@ const Monitoring = Nedara.createWidget({
         const chartHeader = chartCard?.querySelector('.chart-header');
         if (chartHeader) {
             chartHeader.querySelector('.chart-pause-button')?.remove();
-            chartHeader.appendChild(pauseBtn);
+            chartHeader.insertBefore(pauseBtn, chartHeader.querySelector('.chart-expand-btn'));
         }
 
         pauseBtn.addEventListener('click', () => {
@@ -303,6 +313,14 @@ const Monitoring = Nedara.createWidget({
             });
         }
 
+        // Alerts drive the card accents, the top bar badge and the alert panel
+        this.alerts = data.alerts || [];
+        const alertsByTarget = {};
+        _.each(this.alerts, alert => {
+            (alertsByTarget[alert.target_id] = alertsByTarget[alert.target_id] || []).push(alert);
+        });
+        this.envThresholds = (wc && wc.thresholds) || {};
+
         // Panel visibility
         const sectionDetails = document.getElementById('section-details');
         const httpPanel      = document.getElementById('chart-panel-http');
@@ -329,11 +347,23 @@ const Monitoring = Nedara.createWidget({
         if (wsEl) {
             const ws = data.web_status;
             const isOnline = ws.status === 'Online';
-            wsEl.className = `status-indicator ${isOnline ? 'status-healthy' : 'status-critical'}`;
+            const webAlerts = alertsByTarget['web-app-card'] || [];
+            const webSeverity = this.worstSeverity(webAlerts);
+            wsEl.className = `status-indicator ${isOnline ? (webSeverity === 'none' ? 'status-healthy' : 'status-' + webSeverity) : 'status-critical'}`;
             const stEl = document.getElementById('web-url-status-text');
             stEl.textContent = isOnline ? 'Online' : (ws.status_code ? `Error ${ws.status_code}` : 'Offline');
-            stEl.style.color  = isOnline ? '#10b981' : '#ef4444';
-            document.getElementById('web-url-response-time').textContent = isOnline ? ws.response_time : '—';
+            stEl.className = `metric-value-text ${isOnline ? 'value-low' : 'value-high'}`;
+
+            const rtEl = document.getElementById('web-url-response-time');
+            const rtMs = isOnline ? parseFloat(ws.response_time) : null;
+            rtEl.textContent = isOnline ? ws.response_time : '—';
+            rtEl.className = 'metric-value-text' + (rtMs === null ? '' : ' ' + this.getValueColorClass(
+                rtMs, this.envThresholds.response_time_warning, this.envThresholds.response_time_critical,
+            ));
+
+            const webCard = document.getElementById('web-app-dash-card');
+            if (webCard) webCard.dataset.severity = isOnline ? webSeverity : 'critical';
+            this._updateAlertChip(document.getElementById('web-alert-chip'), webAlerts);
 
             const linkEl = document.getElementById('web-url-link-container');
             if (linkEl && data.web_url) {
@@ -363,20 +393,22 @@ const Monitoring = Nedara.createWidget({
             if (server.error) {
                 if (server.type === 'linux' && !key.endsWith('_processes')) {
                     $serversRow.append(Nedara.renderTemplate('linux-server-unreachable', {
-                        id: key, name: server.name || key,
+                        id: key,
+                        name: this.sanitize(server.name || key),
+                        error_detail: this.sanitize(String(server.error).slice(0, 160)),
                     }));
                 } else if (server.type === 'postgres') {
                     const pgStatus = document.getElementById('postgres-status');
                     if (pgStatus) pgStatus.className = 'status-indicator status-critical';
                     const qTbody = document.querySelector('#postgres-queries tbody');
                     if (qTbody) qTbody.innerHTML =
-                        '<tr><td colspan="5" style="text-align:center;padding:1.25rem 0;color:#ef4444;font-size:0.8125rem;font-weight:500">PostgreSQL unreachable</td></tr>';
+                        '<tr class="table-empty table-error"><td colspan="5">PostgreSQL unreachable</td></tr>';
                 } else if (server.type === 'pgbouncer') {
                     const pgbStatus = document.getElementById('pgbouncer-status');
                     if (pgbStatus) pgbStatus.className = 'status-indicator status-critical';
                     const pgbTbody = document.querySelector('#pgbouncer-pools tbody');
                     if (pgbTbody) pgbTbody.innerHTML =
-                        '<tr><td colspan="8" style="text-align:center;padding:1.25rem 0;color:#ef4444;font-size:0.8125rem;font-weight:500">PGBouncer unreachable</td></tr>';
+                        '<tr class="table-empty table-error"><td colspan="8">PGBouncer unreachable</td></tr>';
                 }
                 return;
             }
@@ -396,27 +428,64 @@ const Monitoring = Nedara.createWidget({
                         }
                     }
 
-                    const mounts = (server.mounts || []).map(m => Object.assign({}, m, {
-                        percent_usage_class: this.getStatusClass(m.percent),
-                        percent_value_class: this.getValueColorClass(m.percent),
-                    }));
+                    const thr = server.thresholds || {};
+                    const serverAlerts = alertsByTarget[key] || [];
+                    const severity = this.worstSeverity(serverAlerts);
+
+                    const mounts = (server.mounts || []).map(m => {
+                        const mountAlert = serverAlerts.find(
+                            a => a.key === `mount:${key}:${m.mountpoint}`,
+                        );
+                        return Object.assign({}, m, {
+                            percent_usage_class: this.getStatusClass(m.percent, thr.mount_warning, thr.mount_critical),
+                            percent_value_class: this.getValueColorClass(m.percent, thr.mount_warning, thr.mount_critical),
+                            row_class: mountAlert ? `is-${mountAlert.severity}` : '',
+                        });
+                    });
+                    const mountAlertCount = mounts.filter(m => m.row_class).length;
                     const worstMountPct = mounts.length ? Math.max(...mounts.map(m => m.percent)) : 0;
 
-                    $serversRow.append(Nedara.renderTemplate('linux-server', Object.assign({
+                    const cores = parseFloat(server.cpu_cores) || 1;
+                    const loadAvg = parseFloat(server.load_avg) || 0;
+                    const loadPerCore = loadAvg / cores;
+                    const loadCritical = parseFloat(thr.load_critical) || 3;
+
+                    $serversRow.append(Nedara.renderTemplate('linux-server', Object.assign({}, server, {
                         id: key,
-                        cpu_usage_class:     this.getStatusClass(server.cpu_usage),
-                        ram_usage_class:     this.getStatusClass(server.ram_usage_percent),
-                        storage_usage_class: this.getStatusClass(server.storage_usage_percent),
-                        cpu_value_class:     this.getValueColorClass(server.cpu_usage),
-                        ram_value_class:     this.getValueColorClass(server.ram_usage_percent),
-                        storage_value_class: this.getValueColorClass(server.storage_usage_percent),
+                        name: this.sanitize(server.name || key),
+                        cpu_bar_width:       Math.min(100, parseFloat(server.cpu_usage) || 0),
+                        ram_bar_width:       Math.min(100, parseFloat(server.ram_usage_percent) || 0),
+                        storage_bar_width:   Math.min(100, parseFloat(server.storage_usage_percent) || 0),
+                        load_bar_width:      Math.min(100, (loadPerCore / loadCritical) * 100),
+                        cpu_usage_class:     this.getStatusClass(server.cpu_usage, thr.cpu_warning, thr.cpu_critical),
+                        ram_usage_class:     this.getStatusClass(server.ram_usage_percent, thr.ram_warning, thr.ram_critical),
+                        storage_usage_class: this.getStatusClass(server.storage_usage_percent, thr.disk_warning, thr.disk_critical),
+                        load_usage_class:    this.getStatusClass(loadPerCore, thr.load_warning, thr.load_critical),
+                        cpu_value_class:     this.getValueColorClass(server.cpu_usage, thr.cpu_warning, thr.cpu_critical),
+                        ram_value_class:     this.getValueColorClass(server.ram_usage_percent, thr.ram_warning, thr.ram_critical),
+                        storage_value_class: this.getValueColorClass(server.storage_usage_percent, thr.disk_warning, thr.disk_critical),
+                        load_value_class:    this.getValueColorClass(loadPerCore, thr.load_warning, thr.load_critical),
+                        cpu_row_class:       this.alertRowClass(serverAlerts, 'cpu'),
+                        ram_row_class:       this.alertRowClass(serverAlerts, 'ram'),
+                        storage_row_class:   this.alertRowClass(serverAlerts, 'disk'),
+                        load_row_class:      this.alertRowClass(serverAlerts, 'load'),
+                        load_per_core:       loadPerCore.toFixed(2),
+                        cpu_cores:           cores,
                         health_class: this.getHealthStatus({
-                            cpu: server.cpu_usage,
-                            ram: server.ram_usage_percent,
-                            storage: Math.max(server.storage_usage_percent, worstMountPct),
-                        }),
+                            cpu: parseFloat(server.cpu_usage) || 0,
+                            ram: parseFloat(server.ram_usage_percent) || 0,
+                            storage: Math.max(parseFloat(server.storage_usage_percent) || 0, worstMountPct),
+                            load: loadPerCore,
+                        }, thr),
+                        severity,
+                        has_alerts: serverAlerts.length > 0,
+                        has_logs: server.logs !== undefined && server.logs !== '',
+                        alert_chip_text: this.alertChipText(serverAlerts),
+                        alert_tooltip: this.sanitize(serverAlerts.map(a => a.message).join(' · ')),
+                        mounts_alert_text: mountAlertCount ? `${mountAlertCount} alerting` : '',
+                        mounts_alert_class: mountAlertCount ? `is-${severity}` : '',
                         mounts,
-                    }, server)));
+                    })));
 
                     chartDataMap[server.chart_label] = {
                         cpu:  parseFloat(server.cpu_usage),
@@ -429,7 +498,10 @@ const Monitoring = Nedara.createWidget({
                 }
 
             } else if (server.type === 'postgres') {
-                document.getElementById('postgres-status').className = 'status-indicator status-healthy';
+                const pgAlerts = alertsByTarget['postgres-panel'] || [];
+                const pgSeverity = this.worstSeverity(pgAlerts);
+                document.getElementById('postgres-status').className =
+                    `status-indicator status-${pgSeverity === 'none' ? 'healthy' : pgSeverity}`;
                 document.getElementById('main-db').textContent        = server.main_db;
                 document.getElementById('query-count').textContent    = server.active_queries.length;
                 document.getElementById('postgres-db-size').textContent =
@@ -440,6 +512,12 @@ const Monitoring = Nedara.createWidget({
                     (!isNaN(ata) && ata >= 0) ? `${ata.toFixed(2)}s` : '0.00s';
                 document.getElementById('avg-wait-time-idle').textContent =
                     (!isNaN(ati) && ati >= 0) ? `${ati.toFixed(2)}s` : '0.00s';
+
+                const pgThr = server.thresholds || {};
+                this._flagStat('stat-wait-active', ata,
+                    pgThr.pg_active_wait_warning, pgThr.pg_active_wait_critical);
+                this._flagStat('stat-wait-idle', ati,
+                    pgThr.pg_idle_tx_warning, pgThr.pg_idle_tx_critical);
 
                 _.each(server.all_databases, db => allDatabases.add(db));
 
@@ -455,7 +533,10 @@ const Monitoring = Nedara.createWidget({
 
             } else if (server.type === 'pgbouncer') {
                 const upd = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-                document.getElementById('pgbouncer-status').className = 'status-indicator status-healthy';
+                const pgbAlerts = alertsByTarget['pgbouncer-panel'] || [];
+                const pgbSeverity = this.worstSeverity(pgbAlerts);
+                document.getElementById('pgbouncer-status').className =
+                    `status-indicator status-${pgbSeverity === 'none' ? 'healthy' : pgbSeverity}`;
                 upd('pgb-cl-active',  server.total_cl_active);
                 upd('pgb-cl-waiting', server.total_cl_waiting);
                 upd('pgb-sv-active',  server.total_sv_active);
@@ -464,6 +545,12 @@ const Monitoring = Nedara.createWidget({
                 upd('pgb-avg-query',  `${parseFloat(server.avg_query_time_ms || 0).toFixed(2)} ms`);
                 upd('pgb-max-wait',   `${parseFloat(server.max_wait          || 0).toFixed(2)} s`);
                 upd('pgb-pool-size',  server.default_pool_size || '?');
+
+                const pgbThr = server.thresholds || {};
+                this._flagStat('stat-pgb-waiting', parseFloat(server.total_cl_waiting),
+                    pgbThr.pgb_waiting_warning, pgbThr.pgb_waiting_critical);
+                this._flagStat('stat-pgb-max-wait', parseFloat(server.max_wait),
+                    pgbThr.pgb_maxwait_warning, pgbThr.pgb_maxwait_critical);
 
                 const pgbTbody = document.querySelector('#pgbouncer-pools tbody');
                 if (pgbTbody && Array.isArray(server.pools)) {
@@ -541,7 +628,8 @@ const Monitoring = Nedara.createWidget({
         this.highlightCriticalQueries();
         this.applyFilters();
         this.applyProcessesFilters();
-        this.updateOverallStatus();
+        this.renderAlerts(data);
+        this.updateOverallStatus(data.alert_summary);
         this._showDashboard();
     },
 
@@ -599,14 +687,221 @@ const Monitoring = Nedara.createWidget({
         return `rgba(${parseInt(hex.slice(0,2),16)},${parseInt(hex.slice(2,4),16)},${parseInt(hex.slice(4,6),16)},${alpha})`;
     },
 
-    getStatusClass:      function (v) { return v < 70 ? 'usage-low' : v < 90 ? 'usage-medium' : 'usage-high'; },
-    getValueColorClass:  function (v) { return v < 70 ? 'value-low' : v < 90 ? 'value-medium' : 'value-high'; },
+    // Severity of a value against its configured thresholds (defaults: 70 / 90)
+    severityFor: function (value, warning, critical) {
+        const v = parseFloat(value);
+        if (isNaN(v)) return 'none';
+        const warn = isNaN(parseFloat(warning)) ? 70 : parseFloat(warning);
+        const crit = isNaN(parseFloat(critical)) ? 90 : parseFloat(critical);
+        if (v >= crit) return 'critical';
+        if (v >= warn) return 'warning';
+        return 'none';
+    },
+
+    getStatusClass: function (v, warning, critical) {
+        const sev = this.severityFor(v, warning, critical);
+        return sev === 'critical' ? 'usage-high' : sev === 'warning' ? 'usage-medium' : 'usage-low';
+    },
+
+    getValueColorClass: function (v, warning, critical) {
+        const sev = this.severityFor(v, warning, critical);
+        return sev === 'critical' ? 'value-high' : sev === 'warning' ? 'value-medium' : 'value-low';
+    },
+
     getProcessStatusClass: function (v) { return v < 30 ? 'value-low' : v < 70 ? 'value-medium' : 'value-high'; },
 
-    getHealthStatus: function (v) {
-        return v.cpu > 90 || v.ram > 90 || v.storage > 90 ? 'status-critical'
-             : v.cpu > 70 || v.ram > 70 || v.storage > 70 ? 'status-warning'
+    getHealthStatus: function (v, thr) {
+        thr = thr || {};
+        const severities = [
+            this.severityFor(v.cpu, thr.cpu_warning, thr.cpu_critical),
+            this.severityFor(v.ram, thr.ram_warning, thr.ram_critical),
+            this.severityFor(v.storage, thr.disk_warning, thr.disk_critical),
+            this.severityFor(v.mount, thr.mount_warning, thr.mount_critical),
+            this.severityFor(v.load, thr.load_warning, thr.load_critical),
+        ];
+        return severities.includes('critical') ? 'status-critical'
+             : severities.includes('warning')  ? 'status-warning'
              : 'status-healthy';
+    },
+
+    // ——————————————————————————————————————————
+    // ALERTS
+    // ——————————————————————————————————————————
+
+    // Values are injected raw into the templates: keep markup out of them
+    sanitize: function (value) {
+        return String(value === undefined || value === null ? '' : value).replace(/[<>"'`]/g, ' ');
+    },
+
+    worstSeverity: function (alerts) {
+        const live = (alerts || []).filter(a => !a.clearing);
+        if (live.some(a => a.severity === 'critical')) return 'critical';
+        if (live.some(a => a.severity === 'warning'))  return 'warning';
+        return 'none';
+    },
+
+    alertRowClass: function (alerts, category) {
+        const alert = (alerts || []).find(a => a.category === category && !a.clearing);
+        return alert ? `is-${alert.severity}` : '';
+    },
+
+    alertChipText: function (alerts) {
+        const count = (alerts || []).filter(a => !a.clearing).length;
+        return count ? `${count} alert${count > 1 ? 's' : ''}` : '';
+    },
+
+    formatDuration: function (seconds) {
+        const s = Math.max(0, parseInt(seconds, 10) || 0);
+        if (s < 60) return `${s}s`;
+        if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+        const h = Math.floor(s / 3600);
+        if (h < 24) return `${h}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
+        return `${Math.floor(h / 24)}d ${String(h % 24).padStart(2, '0')}h`;
+    },
+
+    _span: function (className, text) {
+        const el = document.createElement('span');
+        if (className) el.className = className;
+        el.textContent = text === undefined || text === null ? '' : String(text);
+        return el;
+    },
+
+    _updateAlertChip: function (el, alerts) {
+        if (!el) return;
+        const severity = this.worstSeverity(alerts);
+        const text = this.alertChipText(alerts);
+        if (severity === 'none' || !text) {
+            el.style.display = 'none';
+            el.textContent = '';
+            return;
+        }
+        el.style.display = '';
+        el.className = `card-alert-chip is-${severity}`;
+        el.textContent = text;
+        el.title = alerts.map(a => a.message).join(' · ');
+    },
+
+    _flagStat: function (id, value, warning, critical) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const severity = this.severityFor(value, warning, critical);
+        el.classList.toggle('is-warning', severity === 'warning');
+        el.classList.toggle('is-critical', severity === 'critical');
+    },
+
+    _buildAlertItem: function (alert) {
+        // A <div> rather than a <button>: buttons do not grow to fit a
+        // multi-line flex layout in every engine.
+        const item = document.createElement('div');
+        item.setAttribute('role', 'button');
+        item.setAttribute('tabindex', '0');
+        item.className = `alert-item is-${alert.severity}${alert.clearing ? ' is-clearing' : ''}`;
+        if (alert.target_id) item.dataset.targetId = alert.target_id;
+        item.title = alert.message || '';
+
+        const dot = document.createElement('span');
+        dot.className = `status-indicator status-${alert.severity}`;
+
+        const line = document.createElement('div');
+        line.className = 'alert-line';
+        line.appendChild(this._span('alert-target', alert.target));
+        line.appendChild(this._span('alert-metric', alert.label));
+        if (alert.value_display) {
+            line.appendChild(this._span('alert-value', alert.value_display));
+        }
+        if (alert.threshold_display) {
+            line.appendChild(this._span('alert-threshold', `threshold ${alert.threshold_display}`));
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'alert-meta';
+        const bits = [this._span('alert-duration', `for ${this.formatDuration(alert.duration)}`)];
+        if (alert.since) {
+            bits.push(this._span('', `since ${this.formatTime(new Date(alert.since * 1000))}`));
+        }
+        if (alert.detail) {
+            bits.push(this._span('alert-detail', alert.detail));
+        }
+        if (alert.notified) {
+            bits.push(this._span('', '✉ mail sent'));
+        }
+        bits.forEach((bit, index) => {
+            if (index) meta.appendChild(this._span('alert-sep', '·'));
+            meta.appendChild(bit);
+        });
+
+        const body = document.createElement('div');
+        body.className = 'alert-body';
+        body.append(line, meta);
+
+        const side = document.createElement('div');
+        side.className = 'alert-side';
+        side.appendChild(this._span('alert-sev', alert.clearing ? 'clearing' : alert.severity));
+        side.appendChild(this._span('alert-tag', alert.category));
+
+        item.append(dot, body, side);
+        return item;
+    },
+
+    renderAlerts: function (data) {
+        const alerts  = data.alerts || [];
+        const summary = data.alert_summary || { critical: 0, warning: 0 };
+        const section = document.getElementById('section-alerts');
+        const list    = document.getElementById('alerts-list');
+        const empty   = document.getElementById('alerts-empty');
+        const chips   = document.getElementById('alerts-chips');
+        if (!section || !list) return;
+
+        section.dataset.severity =
+            summary.critical ? 'critical' : summary.warning ? 'warning' : 'none';
+
+        if (chips) {
+            const parts = [];
+            if (summary.critical) parts.push(['is-critical', `${summary.critical} critical`]);
+            if (summary.warning)  parts.push(['is-warning',  `${summary.warning} warning`]);
+            if (!parts.length)    parts.push(['is-ok',       'all clear']);
+            chips.replaceChildren(...parts.map(([cls, text]) => {
+                const chip = this._span(`alerts-chip ${cls}`, text);
+                return chip;
+            }));
+        }
+
+        const visible = this.alertsSeverityFilter === 'critical'
+            ? alerts.filter(a => a.severity === 'critical')
+            : alerts;
+
+        list.replaceChildren(...visible.map(alert => this._buildAlertItem(alert)));
+
+        if (empty) {
+            empty.style.display = visible.length ? 'none' : '';
+            const message = empty.querySelector('span');
+            if (message) {
+                message.textContent = alerts.length
+                    ? 'No critical alert — only warnings are currently active.'
+                    : 'No active alert — every monitored metric is below its threshold.';
+            }
+        }
+    },
+
+    _restoreAlertsPanelState: function () {
+        const section = document.getElementById('section-alerts');
+        const toggle  = document.getElementById('alerts-toggle');
+        const filter  = document.getElementById('alerts-severity-filter');
+        if (section) section.classList.toggle('is-collapsed', this.alertsCollapsed);
+        if (toggle)  toggle.textContent = this.alertsCollapsed ? '▸' : '▾';
+        if (filter)  filter.value = this.alertsSeverityFilter;
+    },
+
+    focusAlertTarget: function (targetId) {
+        const el = document.getElementById(targetId);
+        if (!el) return;
+        const card = el.closest('.dash-card') || el.querySelector('.dash-card') || el;
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.remove('card-focus');
+        // Force a reflow so the animation replays on repeated clicks
+        void card.offsetWidth;
+        card.classList.add('card-focus');
+        setTimeout(() => card.classList.remove('card-focus'), 1800);
     },
 
     formatTime: function (d) {
@@ -626,16 +921,24 @@ const Monitoring = Nedara.createWidget({
         return out;
     },
 
-    updateOverallStatus: function () {
-        const hasCrit = this.$container.find('.status-critical').not('#overall-status').length;
-        const hasWarn = this.$container.find('.status-warning').not('#overall-status').length;
+    updateOverallStatus: function (summary) {
+        const counts  = summary || { critical: 0, warning: 0 };
+        const hasCrit = counts.critical > 0;
+        const hasWarn = counts.warning > 0;
         const badge   = document.getElementById('status-badge');
         const dot     = document.getElementById('overall-status');
         const text    = document.getElementById('status-text');
 
+        const parts = [];
+        if (hasCrit) parts.push(`${counts.critical} critical`);
+        if (hasWarn) parts.push(`${counts.warning} warning`);
+
         badge.className = hasCrit ? 'badge-critical' : hasWarn ? 'badge-warning' : '';
         dot.className   = `status-indicator ${hasCrit ? 'status-critical' : hasWarn ? 'status-warning' : 'status-healthy'}`;
-        text.textContent = hasCrit ? 'Critical Issues' : hasWarn ? 'Warnings' : 'All Operational';
+        text.textContent = parts.length ? parts.join(' · ') : 'All Operational';
+        badge.title = parts.length
+            ? `${parts.join(', ')} — see the alert panel for details`
+            : 'Every monitored metric is below its threshold';
     },
 
     highlightCriticalQueries: function () {
@@ -839,6 +1142,37 @@ const Monitoring = Nedara.createWidget({
 
     _onThemeToggleClick: function () {
         window.cycleTheme();
+    },
+
+    _onAlertsToggleClick: function (ev) {
+        ev.preventDefault();
+        this.alertsCollapsed = !this.alertsCollapsed;
+        localStorage.setItem('nedara-alerts-collapsed', this.alertsCollapsed ? '1' : '0');
+        this._restoreAlertsPanelState();
+    },
+
+    _onAlertsSeverityFilterChange: function (ev) {
+        this.alertsSeverityFilter = ev.target.value;
+        localStorage.setItem('nedara-alerts-severity', this.alertsSeverityFilter);
+        this.renderAlerts({
+            alerts: this.alerts,
+            alert_summary: {
+                critical: this.alerts.filter(a => a.severity === 'critical').length,
+                warning: this.alerts.filter(a => a.severity === 'warning').length,
+            },
+        });
+    },
+
+    _onAlertItemClick: function (ev) {
+        const targetId = ev.currentTarget.dataset.targetId;
+        if (targetId) this.focusAlertTarget(targetId);
+    },
+
+    _onAlertItemKeydown: function (ev) {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        ev.preventDefault();
+        const targetId = ev.currentTarget.dataset.targetId;
+        if (targetId) this.focusAlertTarget(targetId);
     },
 });
 

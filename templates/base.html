@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Nedara Monitoring{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     {% block favicon %}{% endblock %}
 
     <!-- Anti-FOUC: apply saved theme class before any render -->
@@ -17,28 +19,8 @@
         })();
     </script>
 
-    <!-- Tailwind CDN (load first), then config -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } }
-        }
-    </script>
-    <style type="text/tailwindcss">
-        body { @apply font-sans antialiased; }
-    </style>
-    <style>
-        .btn-theme {
-            background: transparent !important; color: #64748b !important;
-            border: 1px solid #e2e8f0 !important; border-radius: 8px !important;
-            font-size: 0.75rem !important; height: 28px !important;
-            min-width: 0 !important; padding: 0 0.6rem !important; cursor: pointer;
-        }
-        .dark .btn-theme { color: #94a3b8 !important; border-color: rgba(51,65,85,0.65) !important; }
-        .btn-theme:hover { background: #f1f5f9 !important; color: #6366f1 !important; border-color: rgba(99,102,241,0.3) !important; }
-        .dark .btn-theme:hover { background: rgba(99,102,241,0.1) !important; color: #818cf8 !important; }
-    </style>
+    <!-- Design tokens and shared primitives — every page builds on these -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/nedara-base.css') }}">
 
     {% block head_extra %}{% endblock %}
 </head>
