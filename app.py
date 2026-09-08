@@ -102,6 +102,10 @@ DEFAULT_THRESHOLDS = {
     'mount_critical': 90.0,
     'load_warning': 1.5,               # load average (1m) per CPU core
     'load_critical': 3.0,
+    'temp_warning': 70.0,              # °C — CPU, GPU and board sensors
+    'temp_critical': 85.0,
+    'disk_temp_warning': 55.0,         # °C — NVMe and SATA drives
+    'disk_temp_critical': 70.0,
     'response_time_warning': 1000.0,   # ms — web application response time
     'response_time_critical': 5000.0,
     'pg_active_wait_warning': 30.0,    # s — longest running active query
@@ -247,6 +251,8 @@ def _fmt_metric(value, unit):
         return f"{value:.0f} ms"
     if unit == 's':
         return f"{value:.1f} s"
+    if unit == '°C':
+        return f"{value:.1f}°C"
     if unit == 'x':
         return f"{value:.2f}"
     if not unit:
@@ -657,6 +663,20 @@ def evaluate_alerts(environment, data):
                     detail=f"load average (1m) {load_avg:.2f} on {int(cores)} core(s)",
                 ))
 
+            for sensor in server.get('temperatures') or []:
+                sensor_thresholds = {
+                    'warning': sensor.get('warning', thresholds['temp_warning']),
+                    'critical': sensor.get('critical', thresholds['temp_critical']),
+                }
+                detail = ' · '.join(p for p in (sensor.get('chip'), sensor.get('device'),
+                                                sensor.get('label')) if p)
+                candidates.append(_threshold_alert(
+                    f"temp:{server_key}:{sensor['name']}", 'temperature', 'server',
+                    name, server_key, f"Temperature {sensor['name']}",
+                    sensor.get('temp'), sensor_thresholds, 'warning', 'critical',
+                    unit='°C', detail=detail,
+                ))
+
             for mount in server.get('mounts') or []:
                 candidates.append(_threshold_alert(
                     f"mount:{server_key}:{mount.get('mountpoint')}", 'mount', 'server',
@@ -933,6 +953,160 @@ def get_widget_config(environment):
     return data
 
 
+# ──────────────────────────────────────────────────────────────
+# HARDWARE TEMPERATURES
+# ──────────────────────────────────────────────────────────────
+
+# Read straight from sysfs: no extra package on the monitored host, no root.
+# hwmon carries labels and covers CPU packages, NVMe/SATA drives (nvme and
+# drivetemp), GPUs and board sensors; the thermal zones are the fallback for
+# machines that expose no hwmon temperature at all (some VMs, most SBCs).
+SENSORS_CMD = r'''
+{ for d in /sys/class/hwmon/hwmon*; do
+    [ -r "$d/name" ] || continue
+    n=$(cat "$d/name" 2>/dev/null)
+    dev=""
+    if [ -d "$d/device/block" ]; then dev=$(ls "$d/device/block" 2>/dev/null | head -n1); fi
+    if [ -z "$dev" ] && [ -e "$d/device" ]; then dev=$(basename "$(readlink -f "$d/device" 2>/dev/null)" 2>/dev/null); fi
+    for f in "$d"/temp*_input; do
+      [ -r "$f" ] || continue
+      v=$(cat "$f" 2>/dev/null) || continue
+      [ -n "$v" ] || continue
+      l=""
+      lf="${f%_input}_label"
+      [ -r "$lf" ] && l=$(cat "$lf" 2>/dev/null)
+      printf 'hwmon\t%s\t%s\t%s\t%s\n' "$n" "$l" "$dev" "$v"
+    done
+  done
+  for d in /sys/class/thermal/thermal_zone*; do
+    [ -r "$d/temp" ] || continue
+    printf 'zone\t%s\t\t\t%s\n' "$(cat "$d/type" 2>/dev/null)" "$(cat "$d/temp" 2>/dev/null)"
+  done
+} 2>/dev/null
+'''
+
+TEMP_CPU_CHIPS = (
+    'coretemp', 'k10temp', 'zenpower', 'k8temp', 'via_cputemp',
+    'cpu_thermal', 'cpu-thermal', 'soc_thermal', 'armada_thermal', 'x86_pkg_temp',
+)
+TEMP_DISK_CHIPS = ('nvme', 'drivetemp')
+TEMP_GPU_CHIPS = ('amdgpu', 'nouveau', 'radeon', 'i915', 'xe')
+TEMP_CPU_LABELS = ('package', 'tctl', 'tdie', 'cpu')
+DISK_DEVICE_RE = re.compile(r'^(nvme\d+|sd[a-z]+|hd[a-z]+|vd[a-z]+|xvd[a-z]+|mmcblk\d+)$')
+
+# A laptop or a well-instrumented board can expose fifty readings; keep the
+# list short enough to stay glanceable on a card.
+MAX_TEMP_SENSORS = 10
+MAX_OTHER_TEMP_SENSORS = 3
+
+
+def _temp_kind(chip, label):
+    chip = (chip or '').lower()
+    label = (label or '').lower()
+    if chip.startswith(TEMP_DISK_CHIPS) or 'nvme' in chip:
+        return 'disk'
+    if chip.startswith(TEMP_CPU_CHIPS) or 'cpu' in chip:
+        return 'cpu'
+    if chip.startswith(TEMP_GPU_CHIPS) or 'gpu' in chip:
+        return 'gpu'
+    if label.startswith(TEMP_CPU_LABELS) and chip in ('acpitz', 'thermal'):
+        return 'cpu'
+    return 'other'
+
+
+def _parse_temperatures(raw):
+    """Aggregate a raw sysfs sensor dump into a short, meaningful list.
+
+    One entry per CPU (its package reading, not its sixteen cores), one per
+    drive (its composite reading, not its three internal sensors), one per
+    GPU, plus the hottest few of everything else.
+    """
+    hwmon, zones = [], []
+    for line in (raw or '').splitlines():
+        parts = line.split('\t')
+        if len(parts) < 5:
+            continue
+        source, chip, label, device, value = (p.strip() for p in parts[:5])
+        temp = _to_float(value)
+        if temp is None:
+            continue
+        if abs(temp) >= 1000:
+            temp /= 1000.0          # sysfs reports millidegrees
+        if not -50 <= temp <= 200:
+            continue                # sensor unplugged or plainly bogus
+        # Case is preserved: a thermal zone type like DIMM or TCPU is the
+        # display name in the fallback path
+        entry = {'chip': chip, 'label': label, 'device': device, 'temp': round(temp, 1)}
+        (hwmon if source == 'hwmon' else zones).append(entry)
+
+    readings = hwmon or zones
+    if not readings:
+        return []
+
+    grouped = {'cpu': [], 'disk': [], 'gpu': [], 'other': []}
+    for entry in readings:
+        grouped[_temp_kind(entry['chip'], entry['label'])].append(entry)
+
+    sensors = []
+
+    def add(name, kind, entry):
+        sensors.append({
+            'name': name,
+            'kind': kind,
+            'chip': entry['chip'],
+            'device': entry['device'],
+            'label': entry['label'],
+            'temp': entry['temp'],
+        })
+
+    if grouped['cpu']:
+        packages = [e for e in grouped['cpu'] if e['label'].lower().startswith(TEMP_CPU_LABELS)]
+        add('CPU', 'cpu', max(packages or grouped['cpu'], key=lambda e: e['temp']))
+
+    disks = {}
+    for entry in grouped['disk']:
+        device = entry['device'] if DISK_DEVICE_RE.match(entry['device'] or '') else ''
+        disks.setdefault(device or entry['chip'], []).append(entry)
+    for device, entries in sorted(disks.items()):
+        composite = [e for e in entries if e['label'].lower().startswith('composite')]
+        best = max(composite or entries, key=lambda e: e['temp'])
+        name = f"Disk {device}" if DISK_DEVICE_RE.match(device) else 'Disk'
+        add(name, 'disk', best)
+
+    gpus = {}
+    for entry in grouped['gpu']:
+        gpus.setdefault(entry['chip'], []).append(entry)
+    for chip, entries in sorted(gpus.items()):
+        best = max(entries, key=lambda e: e['temp'])
+        add('GPU' if len(gpus) == 1 else f"GPU {chip}", 'gpu', best)
+
+    others = sorted(grouped['other'], key=lambda e: -e['temp'])[:MAX_OTHER_TEMP_SENSORS]
+    used = {s['name'].lower() for s in sensors}
+    for entry in others:
+        name = entry['label'] or entry['chip']
+        if name.lower() in used:
+            name = f"{name} ({entry['chip']})"
+        used.add(name.lower())
+        add(name, 'other', entry)
+
+    return sensors[:MAX_TEMP_SENSORS]
+
+
+def _apply_temp_thresholds(payload, thresholds):
+    """Attach the threshold pair each sensor is judged against.
+
+    Drives run cooler than CPUs, so they get their own pair; resolving it
+    here keeps the dashboard, the alert engine and the emails in agreement.
+    """
+    sensors = payload.get('temperatures') or []
+    for sensor in sensors:
+        disk = sensor['kind'] == 'disk'
+        sensor['warning'] = thresholds['disk_temp_warning' if disk else 'temp_warning']
+        sensor['critical'] = thresholds['disk_temp_critical' if disk else 'temp_critical']
+    cpu = [s['temp'] for s in sensors if s['kind'] == 'cpu']
+    payload['temp_max'] = max(cpu) if cpu else (max((s['temp'] for s in sensors), default=None))
+
+
 def get_postgres_stats(postgres_config, environment='default'):
     server_type = postgres_config['type']
     server_name = postgres_config['name']
@@ -1085,6 +1259,12 @@ def get_server_stats(server_config, environment='default'):
         disk_read_bytes = int(disk_parts[0]) if disk_parts else 0
         disk_write_bytes = int(disk_parts[1]) if len(disk_parts) > 1 else 0
 
+        # Hardware temperatures (CPU package, drives, GPU, board sensors)
+        temperatures = []
+        if server_config.get('show_temperatures', '1') != '0':
+            stdin, stdout, stderr = ssh.exec_command(SENSORS_CMD)
+            temperatures = _parse_temperatures(stdout.read().decode())
+
         # Mounted filesystems (excluding root and virtual filesystems)
         mounts = []
         if server_config.get('show_mounts', '1') != '0':
@@ -1134,6 +1314,7 @@ def get_server_stats(server_config, environment='default'):
             'storage_available': storage_available,
             'storage_usage_percent': storage_usage_percent,
             'mounts': mounts,
+            'temperatures': temperatures,
             'logs': html.escape(logs),
             'type': server_config['type'],
             'name': server_config['name'],
@@ -1295,6 +1476,7 @@ def collect_server_data(environment):
     show_postgres_panel = False
     show_http_requests_panel = False
     show_pgbouncer_panel = False
+    show_temperature_panel = False
     for sn in server_names:
         sc = get_server_config(sn)
         if sc.get('type') == 'postgres':
@@ -1326,6 +1508,8 @@ def collect_server_data(environment):
                 for key, payload in result.items():
                     if isinstance(payload, dict) and not key.endswith('_processes'):
                         payload['thresholds'] = thresholds
+                        if payload.get('temperatures'):
+                            _apply_temp_thresholds(payload, thresholds)
                 return result
 
             with ThreadPoolExecutor(max_workers=max(len(server_names), 1)) as executor:
@@ -1368,6 +1552,13 @@ def collect_server_data(environment):
                     'ts': ts_now,
                 }
 
+            # Only offer the temperature chart when some host actually reports one
+            show_temperature_panel = any(
+                sd.get('temperatures')
+                for sn, sd in stats.items()
+                if isinstance(sd, dict) and not sn.endswith('_processes')
+            )
+
             web_status = check_web_status(environment)
 
             data = {
@@ -1382,6 +1573,7 @@ def collect_server_data(environment):
                 'show_postgres_panel': show_postgres_panel,
                 'show_http_requests_panel': show_http_requests_panel,
                 'show_pgbouncer_panel': show_pgbouncer_panel,
+                'show_temperature_panel': show_temperature_panel,
             }
 
             alerts = process_alerts(environment, data)
@@ -1403,6 +1595,8 @@ def collect_server_data(environment):
                     save_chart_data('LoadAvgChart', chart_label, timestamp, float(server_data.get('load_avg', 0)), environment)
                     save_chart_data('NetworkChart', chart_label, timestamp, float(server_data.get('net_mbps', 0)), environment)
                     save_chart_data('DiskIOChart', chart_label, timestamp, float(server_data.get('disk_mbps', 0)), environment)
+                    if server_data.get('temp_max') is not None:
+                        save_chart_data('TempChart', chart_label, timestamp, float(server_data['temp_max']), environment)
 
             socketio.emit('server_data_update', data, room=environment)
 

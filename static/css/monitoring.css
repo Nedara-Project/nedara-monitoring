@@ -1013,3 +1013,51 @@ button.active {
 }
 .mount-item.is-warning  { border-left-color: var(--warn-dot); background: var(--warn-soft); }
 .mount-item.is-critical { border-left-color: var(--crit-dot); background: var(--crit-soft); }
+
+/* ============================================================
+   HARDWARE TEMPERATURES
+   ============================================================ */
+
+.temps-section {
+    margin-top: 0.625rem;
+    padding-top: 0.625rem;
+    border-top: 1px solid var(--border);
+}
+
+.temp-chips {
+    display: flex; flex-wrap: wrap; gap: 0.3rem;
+}
+
+.temp-chip {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    max-width: 100%; min-width: 0;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    font-size: 0.6875rem; font-weight: 600;
+    background: var(--track);
+    border: 1px solid transparent;
+    color: var(--muted);
+    cursor: default;
+}
+.temp-chip i { font-size: 0.65rem; opacity: 0.75; }
+
+.temp-chip-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 8.5rem;
+}
+
+.temp-chip-value {
+    font-family: var(--mono); font-weight: 700;
+    color: var(--text-strong);
+}
+
+.temp-chip.is-warning {
+    background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn);
+}
+.temp-chip.is-warning .temp-chip-value { color: var(--warn); }
+.temp-chip.is-critical {
+    background: var(--crit-soft); border-color: var(--crit-border); color: var(--crit);
+}
+.temp-chip.is-critical .temp-chip-value { color: var(--crit); }
+
+.chart-icon-temp { color: #f43f5e; }

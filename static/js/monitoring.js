@@ -275,6 +275,7 @@ const Monitoring = Nedara.createWidget({
                 { id: 'LoadAvgChart',      container: 'LoadAvgChartContainer',      maxPoints: wc.chart_history },
                 { id: 'NetworkChart',      container: 'NetworkChartContainer',      maxPoints: wc.chart_history },
                 { id: 'DiskIOChart',       container: 'DiskIOChartContainer',       maxPoints: wc.chart_history },
+                { id: 'TempChart',         container: 'TempChartContainer',         maxPoints: wc.chart_history },
             ];
 
             _.each(this.charts, chart => {
@@ -328,6 +329,9 @@ const Monitoring = Nedara.createWidget({
         const pgbPanel       = document.getElementById('pgbouncer-panel');
 
         if (httpPanel) httpPanel.style.display = data.show_http_requests_panel ? '' : 'none';
+
+        const tempPanel = document.getElementById('chart-panel-temp');
+        if (tempPanel) tempPanel.style.display = data.show_temperature_panel ? '' : 'none';
 
         if (pgbPanel) {
             pgbPanel.style.display = data.show_pgbouncer_panel ? '' : 'none';
@@ -443,6 +447,24 @@ const Monitoring = Nedara.createWidget({
                         });
                     });
                     const mountAlertCount = mounts.filter(m => m.row_class).length;
+
+                    const temperatures = (server.temperatures || []).map(t => {
+                        const severity = this.severityFor(t.temp, t.warning, t.critical);
+                        return Object.assign({}, t, {
+                            name: this.sanitize(t.name),
+                            temp_class: severity === 'none' ? '' : `is-${severity}`,
+                            temp_icon: this.tempIcon(t.kind),
+                            temp_title: this.sanitize(
+                                [t.name, `${t.temp}°C`,
+                                 `warning ${t.warning}°C · critical ${t.critical}°C`,
+                                 [t.chip, t.device, t.label].filter(Boolean).join(' '),
+                                ].filter(Boolean).join(' — '),
+                            ),
+                        });
+                    });
+                    const tempAlerts = serverAlerts.filter(
+                        a => a.category === 'temperature' && !a.clearing,
+                    );
                     const worstMountPct = mounts.length ? Math.max(...mounts.map(m => m.percent)) : 0;
 
                     const cores = parseFloat(server.cpu_cores) || 1;
@@ -485,6 +507,10 @@ const Monitoring = Nedara.createWidget({
                         mounts_alert_text: mountAlertCount ? `${mountAlertCount} alerting` : '',
                         mounts_alert_class: mountAlertCount ? `is-${severity}` : '',
                         mounts,
+                        temperatures,
+                        temps_alert_text: tempAlerts.length ? `${tempAlerts.length} alerting` : '',
+                        temps_alert_class: tempAlerts.length
+                            ? `is-${this.worstSeverity(tempAlerts)}` : '',
                     })));
 
                     chartDataMap[server.chart_label] = {
@@ -494,6 +520,8 @@ const Monitoring = Nedara.createWidget({
                         load: parseFloat(server.load_avg  || 0),
                         net:  parseFloat(server.net_mbps  || 0),
                         disk: parseFloat(server.disk_mbps || 0),
+                        temp: server.temp_max === null || server.temp_max === undefined
+                            ? null : parseFloat(server.temp_max),
                     };
                 }
 
@@ -600,6 +628,7 @@ const Monitoring = Nedara.createWidget({
                            : conf.id === 'LoadAvgChart'       ? 'load'
                            : conf.id === 'NetworkChart'       ? 'net'
                            : conf.id === 'DiskIOChart'        ? 'disk'
+                           : conf.id === 'TempChart'          ? 'temp'
                            : null;
                 if (!type) return;
                 const row = chartDataMap[si.label];
@@ -608,9 +637,12 @@ const Monitoring = Nedara.createWidget({
                 const sd = this.seriesData[conf.id][si.label];
                 if (!sd) return;
 
+                const value = row[type];
+                if (value === null || value === undefined) return;
+
                 let ts = now;
                 if (sd.length && ts <= sd[sd.length - 1].time) ts = sd[sd.length - 1].time + 1;
-                sd.push({ time: ts, value: row[type] || 0 });
+                sd.push({ time: ts, value: value || 0 });
 
                 const trimmed = this.ensureUniqueTimestamps(sd.slice(-conf.maxPoints));
                 si.series.setData(trimmed);
@@ -748,6 +780,13 @@ const Monitoring = Nedara.createWidget({
     alertChipText: function (alerts) {
         const count = (alerts || []).filter(a => !a.clearing).length;
         return count ? `${count} alert${count > 1 ? 's' : ''}` : '';
+    },
+
+    tempIcon: function (kind) {
+        return kind === 'cpu'  ? 'fa-microchip'
+             : kind === 'disk' ? 'fa-hard-drive'
+             : kind === 'gpu'  ? 'fa-display'
+             : 'fa-temperature-half';
     },
 
     formatDuration: function (seconds) {

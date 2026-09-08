@@ -16,7 +16,8 @@ Nedara Monitoring is an open-source web application that collects metrics from y
 - **Linux server monitoring** (via SSH)
   - CPU, RAM, and disk utilization with progress bars and color coding
   - Mounted volumes — all non-root partitions (ext4, xfs, LVM, NFS, etc.) with individual usage bars and detail (used / total, free). Shown by default; set `show_mounts = 0` per server to hide.
-  - Load average (1-minute)
+  - Load average (1-minute), reported per CPU core for alerting
+  - Hardware temperatures — CPU package, NVMe and SATA drives, GPU and board sensors, read from `/sys/class/hwmon` (with `/sys/class/thermal` as fallback): no agent, no extra package, no root. Dozens of raw readings are aggregated into one entry per CPU, per drive and per GPU plus the hottest few others; hosts that expose none (most VMs) simply hide the section. Set `show_temperatures = 0` per server to skip them.
   - Network throughput (MB/s receive / transmit)
   - Disk I/O (MB/s read / write)
   - Running processes sorted by CPU/RAM, with colored badges
@@ -31,7 +32,7 @@ Nedara Monitoring is an open-source web application that collects metrics from y
   - Pool statistics: active/waiting clients, active/idle servers, requests/s, max wait, avg query time
   - Per-pool breakdown table
 - **Web application health check** — HTTP status + response time for a configured URL
-- **Real-time charts** (LightweightCharts by TradingView) — CPU, RAM, Load Average, HTTP Requests, Network, Disk I/O
+- **Real-time charts** (LightweightCharts by TradingView) — CPU, RAM, Load Average, HTTP Requests, Network, Disk I/O, Temperature
   - Historical data persisted in SQLite and reloaded on page load
   - Pause/Resume per chart
   - Fullscreen expand for each chart and panel
@@ -42,7 +43,7 @@ Nedara Monitoring is an open-source web application that collects metrics from y
   - Alerting cards, metric rows and volumes are highlighted in place, so the cause is visible without reading the panel
   - Thresholds resolve per scope: global `[thresholds]`, per environment, per server
   - Debounced on both edges: an issue must hold for `alert_sustain_seconds` before it is raised and stay clear for `alert_clear_seconds` before it disappears — a single CPU spike between two polls never alerts
-  - Covers unreachable hosts (SSH, PostgreSQL, PGBouncer), HTTP errors and offline web applications, CPU, RAM, root disk, every mounted volume, load average per core, response time, longest active query, longest idle transaction, waiting PGBouncer clients and pool wait time
+  - Covers unreachable hosts (SSH, PostgreSQL, PGBouncer), HTTP errors and offline web applications, CPU, RAM, root disk, every mounted volume, load average per core, every hardware temperature, response time, longest active query, longest idle transaction, waiting PGBouncer clients and pool wait time
 - **Email notifications** via SMTP
   - One email per collection cycle, grouping every alert that became notifiable, with the same values as the dashboard
   - Throttled **per alert** — an alert about one server never masks an alert about another
@@ -320,6 +321,8 @@ so `cpu_critical = 98` inside `[app1]` only affects that server, and the same ke
 | `disk_warning` / `disk_critical` | % | 70 / 90 | Root filesystem usage |
 | `mount_warning` / `mount_critical` | % | 70 / 90 | Each mounted volume other than `/` |
 | `load_warning` / `load_critical` | load per core | 1.5 / 3.0 | Load average (1m) ÷ CPU core count |
+| `temp_warning` / `temp_critical` | °C | 70 / 85 | CPU package, GPU and board sensors |
+| `disk_temp_warning` / `disk_temp_critical` | °C | 55 / 70 | NVMe and SATA drives, which run cooler |
 | `response_time_warning` / `response_time_critical` | ms | 1000 / 5000 | Web application response time |
 | `pg_active_wait_warning` / `pg_active_wait_critical` | s | 30 / 120 | Longest running active query |
 | `pg_idle_tx_warning` / `pg_idle_tx_critical` | s | 120 / 600 | Longest `idle in transaction` |
@@ -383,6 +386,8 @@ user = deploy                     ; SSH username
 password = secret                 ; SSH password
 log_file = /var/log/myapp/app.log ; optional: path to tail for the Logs button
 nginx_access_file = /var/log/nginx/access.log  ; optional: enables HTTP requests chart
+show_mounts = 1                   ; optional: 0 hides the mounted volumes section
+show_temperatures = 1             ; optional: 0 skips the hardware temperature readings
 chart_label = App Server          ; label shown in charts (must be unique per environment)
 chart_color = #3b82f6             ; line color in charts (hex)
 ```
@@ -402,7 +407,9 @@ cpu_warning = 90
 cpu_critical = 98
 ```
 
-> **SSH user requirements**: the user needs read access to `/proc/loadavg`, `/proc/net/dev`, `/proc/diskstats`, `/proc/meminfo`, and the ability to run `top`, `df`, `ps`, `nproc`. If `log_file` or `nginx_access_file` are set, the user also needs read access to those files.
+> **SSH user requirements**: the user needs read access to `/proc/loadavg`, `/proc/net/dev`, `/proc/diskstats`, `/proc/meminfo`, `/sys/class/hwmon` and `/sys/class/thermal`, and the ability to run `top`, `df`, `ps`, `nproc`. If `log_file` or `nginx_access_file` are set, the user also needs read access to those files. All of these are world-readable on a stock distribution — no `sudo` is required.
+
+> **Temperatures**: SATA drives only report a temperature when the `drivetemp` kernel module is loaded (`modprobe drivetemp`, and `echo drivetemp > /etc/modules-load.d/drivetemp.conf` to make it stick). NVMe drives, CPU packages and board sensors need nothing. Set `show_temperatures = 0` on a server to skip the reading altogether.
 
 #### `type = postgres` — PostgreSQL database
 

@@ -79,6 +79,12 @@ mount_critical = 90
 ; Load average (1m) divided by the CPU core count
 load_warning = 1.5
 load_critical = 3.0
+; Hardware temperatures in degrees Celsius — CPU package, GPU, board sensors
+temp_warning = 70
+temp_critical = 85
+; Hardware temperatures in degrees Celsius — NVMe and SATA drives, which run cooler
+disk_temp_warning = 55
+disk_temp_critical = 70
 ; Web application response time (ms)
 response_time_warning = 1000
 response_time_critical = 5000
@@ -150,6 +156,11 @@ nginx_access_file =
 ; show_mounts: set to 0 to hide the mounted volumes section (partitions other than /).
 ; Default is 1 (visible). Excluded from collection: tmpfs, devtmpfs, squashfs.
 show_mounts = 1
+; show_temperatures: set to 0 to skip the hardware temperature readings.
+; Default is 1. Read from /sys/class/hwmon and /sys/class/thermal — no extra
+; package and no root needed. Virtualised hosts usually expose none, in which
+; case the section and the temperature chart simply stay hidden.
+show_temperatures = 1
 chart_label =
 chart_color = #3b82f6
 ; Any [thresholds] key can be repeated here to override it for this server only,

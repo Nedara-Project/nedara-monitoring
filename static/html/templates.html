@@ -70,6 +70,23 @@
                 </div>
                 <div class="metric-detail">{{load_per_core}} per core — {{cpu_cores}} core(s)</div>
             </div>
+            {{#if temperatures.length}}
+            <div class="temps-section">
+                <div class="mounts-header">
+                    <span class="metric-label">Temperatures</span>
+                    {{#subif temps_alert_text}}<span class="metric-flag {{temps_alert_class}}">{{temps_alert_text}}</span>{{/subif}}
+                </div>
+                <div class="temp-chips">
+                    {{#temperatures}}
+                    <span class="temp-chip {{temp_class}}" title="{{temp_title}}">
+                        <i class="fa-solid {{temp_icon}}" aria-hidden="true"></i>
+                        <span class="temp-chip-name">{{name}}</span>
+                        <span class="temp-chip-value">{{temp}}°C</span>
+                    </span>
+                    {{/temperatures}}
+                </div>
+            </div>
+            {{/if}}
             {{#if mounts.length}}
             <div class="mounts-section">
                 <div class="mounts-header">
