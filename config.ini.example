@@ -156,6 +156,8 @@ nginx_access_file =
 ; show_mounts: set to 0 to hide the mounted volumes section (partitions other than /).
 ; Default is 1 (visible). Excluded from collection: tmpfs, devtmpfs, squashfs.
 show_mounts = 1
+; ignore_mounts: comma-separated mount points or glob patterns to hide from monitoring
+ignore_mounts =
 ; show_temperatures: set to 0 to skip the hardware temperature readings.
 ; Default is 1. Read from /sys/class/hwmon and /sys/class/thermal — no extra
 ; package and no root needed. Virtualised hosts usually expose none, in which

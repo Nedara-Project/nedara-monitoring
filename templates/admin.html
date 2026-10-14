@@ -450,6 +450,12 @@
                         <span class="field-hint">Partitions other than / on the server card.</span>
                     </div>
                     <div class="field field-wide">
+                        <label class="field-label">Ignore mount patterns (optional)</label>
+                        <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="ignore_mounts"
+                               value="{{ sc.get('ignore_mounts', '') }}" placeholder="/mnt/crucial-*, /mnt/temp">
+                        <span class="field-hint">Comma-separated mount points or glob patterns to hide from monitoring.</span>
+                    </div>
+                    <div class="field field-wide">
                         <label class="field-label">Log file path (optional)</label>
                         <input type="text" class="srv-field field-input" data-srv="{{ sname }}" data-field="log_file"
                                value="{{ sc.get('log_file', '') }}" placeholder="/var/log/app.log">

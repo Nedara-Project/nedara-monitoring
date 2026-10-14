@@ -14,6 +14,7 @@ import smtplib
 import urllib3
 import fcntl
 import re
+import fnmatch
 
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -1281,6 +1282,7 @@ def get_server_stats(server_config, environment='default'):
                 if b >= 1024 ** 2: return f"{round(b / 1024 ** 2, 1)}M"
                 return f"{b}B"
 
+            ignore_patterns = [p.strip() for p in server_config.get('ignore_mounts', '').split(',') if p.strip()]
             for line in mount_output.split('\n'):
                 if not line.strip():
                     continue
@@ -1291,6 +1293,8 @@ def get_server_stats(server_config, environment='default'):
                     size_b, used_b, avail_b = int(parts[0]), int(parts[1]), int(parts[2])
                     pct = round(float(parts[3]), 1)
                     mp = parts[4].strip()
+                    if ignore_patterns and any(fnmatch.fnmatch(mp, pat) for pat in ignore_patterns):
+                        continue
                     mounts.append({
                         'mountpoint': mp,
                         'size': _fmt(size_b),
@@ -1825,7 +1829,7 @@ def admin_save():
         for sname, sdata in data.get('servers', {}).items():
             if sname not in config:
                 continue
-            for field in ['host', 'user', 'chart_label', 'chart_color', 'log_file', 'nginx_access_file', 'port', 'database', 'show_mounts']:
+            for field in ['host', 'user', 'chart_label', 'chart_color', 'log_file', 'nginx_access_file', 'port', 'database', 'show_mounts', 'ignore_mounts']:
                 if field in sdata:
                     config[sname][field] = str(sdata[field])
             if sdata.get('password', '').strip():
