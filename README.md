@@ -15,7 +15,7 @@ Nedara Monitoring is an open-source web application that collects metrics from y
 - **Multi-environment support** — switch between environments (production, staging, …) from the UI; each environment has its own collection thread and independent chart history
 - **Linux server monitoring** (via SSH)
   - CPU, RAM, and disk utilization with progress bars and color coding
-  - Mounted volumes — all non-root partitions (ext4, xfs, LVM, NFS, etc.) with individual usage bars and detail (used / total, free). Shown by default; set `show_mounts = 0` per server to hide.
+  - Mounted volumes — all non-root partitions (ext4, xfs, LVM, NFS, etc.) with individual usage bars and detail (used / total, free). Shown by default; set `show_mounts = 0` per server to hide, or use `ignore_mounts` with glob patterns (e.g. `/mnt/disk*`, `/mnt/temp`) to filter out storage pool member drives (e.g. mergerfs) or temporary mounts.
   - Load average (1-minute), reported per CPU core for alerting
   - Hardware temperatures — CPU package, NVMe and SATA drives, GPU and board sensors, read from `/sys/class/hwmon` (with `/sys/class/thermal` as fallback): no agent, no extra package, no root. Dozens of raw readings are aggregated into one entry per CPU, per drive and per GPU plus the hottest few others; hosts that expose none (most VMs) simply hide the section. Set `show_temperatures = 0` per server to skip them.
   - Network throughput (MB/s receive / transmit)
@@ -44,16 +44,19 @@ Nedara Monitoring is an open-source web application that collects metrics from y
   - Thresholds resolve per scope: global `[thresholds]`, per environment, per server
   - Debounced on both edges: an issue must hold for `alert_sustain_seconds` before it is raised and stay clear for `alert_clear_seconds` before it disappears — a single CPU spike between two polls never alerts
   - Covers unreachable hosts (SSH, PostgreSQL, PGBouncer), HTTP errors and offline web applications, CPU, RAM, root disk, every mounted volume, load average per core, every hardware temperature, response time, longest active query, longest idle transaction, waiting PGBouncer clients and pool wait time
-- **Email notifications** via SMTP
-  - One email per collection cycle, grouping every alert that became notifiable, with the same values as the dashboard
-  - Throttled **per alert** — an alert about one server never masks an alert about another
-  - Escalation (warning → critical) notifies immediately, and a "resolved" email is sent when the incident clears
-  - Per-environment toggle — disable alerts on staging while keeping them on production
-  - Configurable alert delay, repeat interval and minimum severity
-  - Mail indicator in the UI when email notifications are configured
+- **Multi-channel notifications** (Telegram, Matrix, and Email)
+  - Flexible channel routing — dispatch alerts via Telegram bots, Matrix / Element rooms, SMTP email, or any combination (`telegram`, `matrix`, `email`, `telegram,matrix`, `both`, `all`, `none`), configured globally or per environment
+  - **Telegram Bot API** — instant alerts sent directly to chats or groups with compact mobile-tailored HTML layouts, color-coded severity badges (🔴 critical, 🟡 warning, 🟢 resolved), metric breakdown, and support for multiple comma-separated chat IDs
+  - **Matrix (Client-Server API)** — native notifications for Matrix homeservers (Conduit, Dendrite, Synapse) and Element clients, with automatic `#alias:domain` to `!id:domain` resolution and semantic badge formatting
+  - **Email (SMTP)** — grouped notification emails per collection cycle with STARTTLS support and optional authentication
+  - Isolated backoff tracking — failures or rate limits on one provider (e.g. SMTP timeout or Telegram rate limiting) never block or delay notifications on other channels
+  - Throttled **per alert** — an alert about one server never masks an alert about another; includes escalation alerts, configurable delay window (`alert_delay_minutes`), repeat intervals (`alert_repeat_minutes`), and resolution messages
+  - Live topbar status indicators — real-time status pills for Telegram, Matrix, and Email with live color dots showing channel health
+  - Dynamic dispatch badge in the dashboard alerts toolbar reflecting active delivery channels and severity thresholds
 - **Web admin interface** at `/admin` — configure the application from the browser without touching `config.ini`, in the same visual language as the dashboard (shared tokens, Auto/Light/Dark)
   - Password-protected (Werkzeug password hash stored in `config.ini`)
   - First-time setup wizard: set the password directly in the browser on first access
+  - Unified **Notifications** tab: interactive Master Channel Routing card with real-time toggle switches, dynamic channel status badges (`ACTIVE`, `PAUSED`, `INCOMPLETE`), live dispatch pipeline summary, and dedicated one-click test message triggers for Telegram, Matrix, and Email
   - Can be disabled entirely by setting `admin_enabled = 0`
 
 ## Requirements
@@ -287,18 +290,24 @@ Alternatively, enable the [Admin interface](#admin-interface) to configure every
 | `secret_key` | Flask session secret — use a long random string |
 | `admin_enabled` | `1` to enable the `/admin` interface, `0` to disable it (default: `0`) |
 | `admin_password` | Werkzeug password hash (see [Admin interface](#admin-interface)) |
+| `alert_channel` | Active notification channel(s): `telegram` (default), `matrix`, `email`, `telegram,matrix`, `both` (telegram+email), `all`, or `none` |
+| `telegram_bot_token` | Bot token provided by @BotFather for Telegram alerts |
+| `telegram_chat_id` | Target Telegram chat ID (comma-separated for multiple chats/groups) |
+| `matrix_homeserver_url` | Base URL of the Matrix homeserver (e.g. `https://matrix.example.com` or `http://192.168.1.10:8008`) |
+| `matrix_access_token` | Access token for the Matrix bot account |
+| `matrix_room_id` | Target Matrix room ID (`!roomid:domain`) or room alias (`#alerts:domain`) |
 | `email_notif_smtp_server` | SMTP host for alert emails |
 | `email_notif_smtp_port` | SMTP port (e.g. `587`) — STARTTLS is used when the server advertises it |
 | `email_notif_login` | SMTP username — leave empty for a relay that requires no authentication |
 | `email_notif_password` | SMTP password — leave empty for a relay that requires no authentication |
 | `email_notif_recipients` | Comma-separated list of recipient addresses |
-| `alert_email_min_severity` | Lowest severity that triggers an email: `critical` (default) or `warning`. Warnings always show on the dashboard. |
-| `alert_repeat_minutes` | Delay before the same, still-active alert is emailed again (default: `60`) |
-| `alert_resolved_emails` | `1` (default) to also email when an alert clears, `0` to stay quiet |
+| `alert_email_min_severity` | Lowest severity that triggers notifications: `critical` (default) or `warning`. Warnings always show on the dashboard. |
+| `alert_repeat_minutes` | Delay before the same, still-active alert is notified again (default: `60`) |
+| `alert_resolved_emails` | `1` (default) to also send a notification when an alert clears, `0` to stay quiet |
 | `alert_sustain_seconds` | How long an issue must hold before it is raised (default: `5`) |
 | `alert_clear_seconds` | How long a raised alert stays visible after the condition disappears (default: `15`) |
 
-> The five `alert_*` keys above can be repeated in an environment section to override them for that environment only.
+> The `alert_*` keys above can be repeated in an environment section to override them for that environment only.
 
 ### `[thresholds]`
 
@@ -367,8 +376,9 @@ alert_delay_minutes = 0           ; wait N minutes before sending (0 = immediate
 | `external_url` | URL the dashboard link points to, when it differs from `url` — typically `url` is the address the application can reach, `external_url` the one the browser needs. Defaults to `url`. |
 | `url_name` | Display label shown next to the health indicator |
 | `servers` | Comma-separated list of server section names to monitor |
-| `send_emails` | `1` to send alerts (default), `0` to disable — useful for staging environments |
-| `alert_delay_minutes` | Minutes to wait before sending an alert email. If the issue resolves within the delay window, no email is sent. `0` = send immediately. |
+| `send_emails` | `1` to send alerts (default), `0` to disable all notifications for this environment — useful for staging environments |
+| `alert_channel` | Overrides the notification channel(s) for this environment only (e.g. `telegram`, `matrix`, `telegram,matrix`, `email`, `both`, `all`, `none`) |
+| `alert_delay_minutes` | Minutes to wait before sending an alert notification. If the issue resolves within the delay window, no notification is sent. `0` = send immediately. |
 | `alert_repeat_minutes`, `alert_email_min_severity`, `alert_resolved_emails`, `alert_sustain_seconds`, `alert_clear_seconds` | Same meaning as in `[general]`, applied to this environment only |
 | any `[thresholds]` key | Overrides that threshold for every server of this environment |
 
@@ -387,6 +397,7 @@ password = secret                 ; SSH password
 log_file = /var/log/myapp/app.log ; optional: path to tail for the Logs button
 nginx_access_file = /var/log/nginx/access.log  ; optional: enables HTTP requests chart
 show_mounts = 1                   ; optional: 0 hides the mounted volumes section
+ignore_mounts = /mnt/disk*, /mnt/temp  ; optional: comma-separated glob patterns to ignore
 show_temperatures = 1             ; optional: 0 skips the hardware temperature readings
 chart_label = App Server          ; label shown in charts (must be unique per environment)
 chart_color = #3b82f6             ; line color in charts (hex)
@@ -408,6 +419,8 @@ cpu_critical = 98
 ```
 
 > **SSH user requirements**: the user needs read access to `/proc/loadavg`, `/proc/net/dev`, `/proc/diskstats`, `/proc/meminfo`, `/sys/class/hwmon` and `/sys/class/thermal`, and the ability to run `top`, `df`, `ps`, `nproc`. If `log_file` or `nginx_access_file` are set, the user also needs read access to those files. All of these are world-readable on a stock distribution — no `sudo` is required.
+
+> **Volume filtering (`ignore_mounts`)**: comma-separated mount points or glob patterns (e.g. `/mnt/disk*`, `/mnt/temp`, `/media/*`) matched using `fnmatch`. Ignored volumes are excluded from metric collection and will never trigger storage alerts. This is especially useful for storage pools (e.g. mergerfs) where underlying drives should be hidden while keeping the unified pool monitored.
 
 > **Temperatures**: SATA drives only report a temperature when the `drivetemp` kernel module is loaded (`modprobe drivetemp`, and `echo drivetemp > /etc/modules-load.d/drivetemp.conf` to make it stick). NVMe drives, CPU packages and board sensors need nothing. Set `show_temperatures = 0` on a server to skip the reading altogether.
 
@@ -469,14 +482,32 @@ debug = 0
 secret_key = change-me-to-a-long-random-string
 admin_enabled = 1
 admin_password =
+
+; Notification channel routing (telegram, matrix, email, telegram,matrix, both, all, none)
+alert_channel = telegram,matrix
+
+; Telegram notifications
+telegram_bot_token = 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
+telegram_chat_id = -1001234567890
+
+; Matrix notifications
+matrix_homeserver_url = https://matrix.example.com
+matrix_access_token = syt_YWxlcnRz...
+matrix_room_id = #alerts:example.com
+
+; Email notifications
 email_notif_smtp_server = smtp.example.com
 email_notif_smtp_port = 587
 email_notif_login = alerts@example.com
 email_notif_password = smtppassword
 email_notif_recipients = admin@example.com, ops@example.com
+
+; Alert behaviour
 alert_email_min_severity = critical
 alert_repeat_minutes = 60
 alert_resolved_emails = 1
+alert_sustain_seconds = 5
+alert_clear_seconds = 15
 
 [thresholds]
 cpu_warning = 70
@@ -504,6 +535,7 @@ url = https://myapp.com
 url_name = Production
 servers = app_prod, db_prod, pgb_prod
 send_emails = 1
+alert_channel = telegram,matrix
 alert_delay_minutes = 2
 
 [app_stg]
@@ -514,6 +546,8 @@ user = deploy
 password = sshpassword
 log_file = /var/log/odoo/odoo.log
 nginx_access_file = /var/log/nginx/access.log
+show_mounts = 1
+ignore_mounts = /mnt/disk*, /mnt/temp
 chart_label = App Staging
 chart_color = #3b82f6
 
@@ -600,9 +634,9 @@ admin_password = scrypt:32768:8:1$...   ; paste the full hash here
 | Tab | Settings |
 |-----|----------|
 | **General** | Display name, refresh rate, chart history, adaptive display, debug mode |
-| **Email** | SMTP server/port/login/password/recipients |
-| **Alerts** | Every warning/critical threshold, plus the per-environment notification behaviour (`send_emails`, delay, repeat interval, minimum severity, resolved emails, sustain/clear windows) |
-| **Servers** | Host, credentials, chart labels/colors, log file paths for each configured server |
+| **Notifications** | Master Channel Routing (interactive Telegram / Matrix / Email switches), dynamic status badges (`ACTIVE`, `PAUSED`, `INCOMPLETE`), live dispatch pipeline summary, channel credentials (Telegram bot token/chat IDs, Matrix homeserver/token/room ID or alias, SMTP relay settings), and instant test dispatch actions (`Send test Telegram message`, `Send test Matrix message`, `Send test email`) |
+| **Alerts** | Every warning/critical threshold, plus per-environment notification behaviour (`send_emails`, `alert_delay_minutes`, repeat interval, minimum severity, resolved alerts, sustain/clear debounce windows) |
+| **Servers** | Host, credentials, chart labels/colors, log file paths, `show_mounts`, `ignore_mounts` volume glob patterns, and `show_temperatures` for each configured server |
 | **Admin** | Enable/disable the interface, change the admin password |
 
 > Adding or removing environments and servers still requires editing `config.ini` and restarting. The admin panel covers settings that can change at runtime.
@@ -628,12 +662,14 @@ Set `admin_enabled = 0` (or remove the key). `/admin` will return a `403` immedi
 | Werkzeug | Password hashing for the admin interface |
 | psycopg | PostgreSQL and PGBouncer connections (requires Python 3.9+) |
 | paramiko | SSH connections to Linux servers |
-| requests | Web application health checks |
+| requests | Web application health checks, Telegram Bot API dispatches, and Matrix Client-Server API calls |
 | LightweightCharts (TradingView) | Interactive time-series charts (loaded from CDN) |
 | Socket.IO client | WebSocket client (loaded from CDN) |
 | Inter + JetBrains Mono | Interface and numeric fonts (loaded from Google Fonts) |
 | Font Awesome | Interface icons (loaded from CDN) |
 | nedarajs | UI widget framework (git submodule) |
+
+> **Note on notifications**: Telegram and Matrix alerting are implemented over native HTTPS using `requests`. No additional SDKs or heavy external dependencies are required.
 
 The stylesheets are plain CSS, no build step: `static/css/nedara-base.css` holds the design
 tokens shared by every page, `monitoring.css` the dashboard and `admin.css` the configuration
