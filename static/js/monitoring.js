@@ -338,10 +338,12 @@ const Monitoring = Nedara.createWidget({
             if (sectionDetails) sectionDetails.classList.toggle('has-pgbouncer', !!data.show_pgbouncer_panel);
         }
 
-        // Notification indicators (Telegram & Email)
+        // Notification indicators (Telegram, Matrix & Email)
         const tgPill = document.getElementById('indicator-telegram');
+        const matrixPill = document.getElementById('indicator-matrix');
         const mailPill = document.getElementById('indicator-email');
         const tgActive = Boolean(wc.telegram_active);
+        const matrixActive = Boolean(wc.matrix_active);
         const mailActive = Boolean(wc.email_active);
 
         if (tgPill) {
@@ -350,6 +352,13 @@ const Monitoring = Nedara.createWidget({
             tgPill.title = tgActive
                 ? `Telegram Alerts: ACTIVE (${wc.alert_email_min_severity || 'critical'})`
                 : 'Telegram Alerts: INACTIVE (Disabled or unconfigured)';
+        }
+        if (matrixPill) {
+            matrixPill.classList.toggle('is-active', matrixActive);
+            matrixPill.classList.toggle('is-inactive', !matrixActive);
+            matrixPill.title = matrixActive
+                ? `Matrix Alerts: ACTIVE (${wc.alert_email_min_severity || 'critical'})`
+                : 'Matrix Alerts: INACTIVE (Disabled or unconfigured)';
         }
         if (mailPill) {
             mailPill.classList.toggle('is-active', mailActive);
@@ -364,6 +373,7 @@ const Monitoring = Nedara.createWidget({
         if (dispatchBadge) {
             let activeChannels = [];
             if (tgActive) activeChannels.push('Telegram');
+            if (matrixActive) activeChannels.push('Matrix');
             if (mailActive) activeChannels.push('Email');
             if (activeChannels.length > 0) {
                 dispatchBadge.style.display = 'inline-flex';

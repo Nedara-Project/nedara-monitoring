@@ -82,14 +82,16 @@ client_environments = {}  # {sid: environment}
 alert_state = {}          # {(environment, alert_key): state_dict}
 mail_backoff = {}         # {environment: epoch before which no send is retried}
 telegram_backoff = {}     # {environment: epoch before which no send is retried}
+matrix_backoff = {}       # {environment: epoch before which no send is retried}
 TMP_DIR = os.path.join(DATA_DIR, "tmp")
 os.makedirs(TMP_DIR, exist_ok=True)
 
 SEVERITY_ORDER = {'warning': 1, 'critical': 2}
 
-# Seconds to wait before retrying after an SMTP failure
+# Seconds to wait before retrying after a delivery failure
 MAIL_RETRY_BACKOFF = 60.0
 TELEGRAM_RETRY_BACKOFF = 60.0
+MATRIX_RETRY_BACKOFF = 60.0
 
 # Alert thresholds. Every key below can be overridden globally in a
 # [thresholds] section, per environment (in the environment section) or per
@@ -139,23 +141,45 @@ def _is_send_emails_enabled(environment):
         return True
 
 
-def _get_alert_channel(environment=None):
+def _get_active_channels(environment=None):
+    ch = ''
     if environment and environment in config:
         ch = config[environment].get('alert_channel', '').strip().lower()
-        if ch:
-            return ch
-    ch = config['general'].get('alert_channel', '').strip().lower()
-    if ch:
-        return ch
-    has_tg = _has_telegram_config(environment)
-    has_ml = _has_mail_config()
-    if has_tg and not has_ml:
-        return 'telegram'
-    if has_ml and not has_tg:
-        return 'email'
-    if has_tg and has_ml:
+    if not ch:
+        ch = config['general'].get('alert_channel', '').strip().lower()
+
+    if not ch:
+        channels = []
+        if _has_telegram_config(environment):
+            channels.append('telegram')
+        if _has_matrix_config(environment):
+            channels.append('matrix')
+        if _has_mail_config():
+            channels.append('email')
+        return channels or ['telegram']
+
+    if ch == 'none':
+        return []
+    if ch == 'both':
+        return ['telegram', 'email']
+    if ch == 'all':
+        return ['telegram', 'matrix', 'email']
+
+    parts = [p.strip() for p in ch.replace('+', ',').split(',') if p.strip()]
+    return parts
+
+
+def _get_alert_channel(environment=None):
+    channels = _get_active_channels(environment)
+    if not channels:
+        return 'none'
+    if set(channels) == {'telegram', 'email'}:
         return 'both'
-    return 'telegram'
+    if set(channels) == {'telegram', 'matrix', 'email'}:
+        return 'all'
+    if len(channels) == 1:
+        return channels[0]
+    return ', '.join(channels)
 
 
 def _has_telegram_config(environment=None):
@@ -169,17 +193,30 @@ def _has_telegram_config(environment=None):
     return bool(token and chat_id)
 
 
+def _has_matrix_config(environment=None):
+    general_config = config['general']
+    hs = general_config.get('matrix_homeserver_url', '').strip()
+    token = general_config.get('matrix_access_token', '').strip()
+    room_id = ''
+    if environment and environment in config:
+        room_id = config[environment].get('matrix_room_id', '').strip()
+    if not room_id:
+        room_id = general_config.get('matrix_room_id', '').strip()
+    return bool(hs and token and room_id)
+
+
 def _has_notification_config(environment=None):
-    channel = _get_alert_channel(environment)
-    if channel == 'telegram':
-        return _has_telegram_config(environment)
-    elif channel == 'email':
-        return _has_mail_config()
-    elif channel == 'both':
-        return _has_telegram_config(environment) or _has_mail_config()
-    elif channel == 'none':
+    channels = _get_active_channels(environment)
+    if not channels:
         return False
-    return _has_telegram_config(environment) or _has_mail_config()
+    for ch in channels:
+        if ch == 'telegram' and _has_telegram_config(environment):
+            return True
+        if ch == 'matrix' and _has_matrix_config(environment):
+            return True
+        if ch == 'email' and _has_mail_config():
+            return True
+    return False
 
 
 def _env_float(environment, key, default):
@@ -598,8 +635,147 @@ def _telegram_send(text, environment=None):
     return any_success
 
 
+def _build_alert_matrix_message(alerts, environment, resolved=False):
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    plain_lines = []
+    html_lines = []
+
+    if resolved:
+        cnt = len(alerts)
+        title = f"Nedara Monitoring [{environment}] — Alert Resolved" if cnt == 1 else f"Nedara Monitoring [{environment}] — {cnt} Alerts Resolved"
+        plain_lines.append(f"✅ {title}")
+        html_lines.append(f"<h3>✅ <b>{html.escape(title)}</b></h3>")
+    else:
+        has_critical = any(a.get('severity') == 'critical' for a in alerts)
+        icon = '🔴' if has_critical else '🟠'
+        level = 'Critical' if has_critical else 'Warning'
+        cnt = len(alerts)
+        title = f"Nedara Monitoring [{environment}] — {level} Alert" if cnt == 1 else f"Nedara Monitoring [{environment}] — {cnt} Active Alerts ({level})"
+        plain_lines.append(f"{icon} {title}")
+        html_lines.append(f"<h3>{icon} <b>{html.escape(title)}</b></h3>")
+
+    plain_lines.append("")
+    html_lines.append("<ul>")
+
+    for a in alerts:
+        sev = a.get('severity', 'warning')
+        bullet = "✅" if resolved else ("🔴" if sev == 'critical' else "🟠")
+        target = a.get('target', '—')
+        label = a.get('label', '—')
+        title_msg = a.get('title') or a.get('message', '')
+
+        plain_lines.append(f"{bullet} {target}: {label}")
+        if title_msg and title_msg != label:
+            plain_lines.append(f"   {title_msg}")
+
+        item_html = [f"<li>{bullet} <b>{html.escape(str(target))}</b>: {html.escape(str(label))}"]
+        if title_msg and title_msg != label:
+            item_html.append(f"<br><i>{html.escape(str(title_msg))}</i>")
+
+        details = []
+        html_details = []
+        if a.get('value') is not None:
+            val = a.get('value_display') or _fmt_metric(a.get('value'), a.get('unit', ''))
+            prefix = 'Last value' if resolved else 'Value'
+            details.append(f"{prefix}: {val}")
+            html_details.append(f"{prefix}: <b>{html.escape(str(val))}</b>")
+        if not resolved and a.get('threshold') is not None:
+            thr = a.get('threshold_display') or _fmt_metric(a.get('threshold'), a.get('unit', ''))
+            details.append(f"Threshold: {thr}")
+            html_details.append(f"Threshold: {html.escape(str(thr))}")
+        if a.get('duration'):
+            dur = _fmt_duration(a.get('duration'))
+            details.append(f"Duration: {dur}")
+            html_details.append(f"Duration: {dur}")
+
+        if details:
+            plain_lines.append("   " + " | ".join(details))
+            item_html.append("<br><span style='color:#64748b;font-size:0.9em;'>" + " | ".join(html_details) + "</span>")
+
+        if a.get('detail'):
+            clean_det = str(a.get('detail')).strip()
+            if clean_det:
+                plain_lines.append(f"   {clean_det[:250]}")
+                item_html.append(f"<br><code>{html.escape(clean_det[:250])}</code>")
+
+        plain_lines.append("")
+        item_html.append("</li>")
+        html_lines.append("".join(item_html))
+
+    html_lines.append("</ul>")
+    plain_lines.append(f"⏱ {now_str}")
+    html_lines.append(f"<p><small style='color:#94a3b8;'>⏱ {now_str}</small></p>")
+
+    nl = chr(10)
+    return nl.join(plain_lines).strip(), "".join(html_lines)
+
+
+def _matrix_send(formatted_html, plain_text, environment=None, test_config=None):
+    from urllib.parse import quote
+    import uuid
+
+    if test_config:
+        hs = test_config.get('matrix_homeserver_url', '').strip()
+        token = test_config.get('matrix_access_token', '').strip()
+        room_id = test_config.get('matrix_room_id', '').strip()
+    else:
+        general_config = config['general']
+        hs = general_config.get('matrix_homeserver_url', '').strip()
+        token = general_config.get('matrix_access_token', '').strip()
+        room_id = ''
+        if environment and environment in config:
+            room_id = config[environment].get('matrix_room_id', '').strip()
+        if not room_id:
+            room_id = general_config.get('matrix_room_id', '').strip()
+
+    if not hs or not token or not room_id:
+        return False, "Missing homeserver URL, access token, or room ID."
+
+    hs = hs.rstrip('/')
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
+
+    # Resolve room alias (#alias:domain) to room ID (!id:domain) if necessary
+    target_room = room_id
+    if room_id.startswith('#'):
+        try:
+            alias_url = f"{hs}/_matrix/client/v3/directory/room/{quote(room_id, safe='')}"
+            r = requests.get(alias_url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                target_room = r.json().get('room_id', room_id)
+            else:
+                return False, f"Could not resolve room alias {room_id}: HTTP {r.status_code} - {r.text}"
+        except Exception as e:
+            return False, f"Error resolving room alias {room_id}: {e}"
+
+    txn_id = f"m_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+    send_url = f"{hs}/_matrix/client/v3/rooms/{quote(target_room, safe='')}/send/m.room.message/{txn_id}"
+
+    payload = {
+        'msgtype': 'm.text',
+        'body': plain_text,
+        'format': 'org.matrix.custom.html',
+        'formatted_body': formatted_html
+    }
+
+    try:
+        resp = requests.put(send_url, json=payload, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            print(f"✅ Matrix notification sent to {target_room}")
+            return True, "Notification sent successfully."
+        else:
+            err_msg = f"HTTP {resp.status_code} - {resp.text}"
+            print(f"❌ Matrix send error to {target_room}: {err_msg}")
+            return False, err_msg
+    except Exception as e:
+        print(f"❌ Matrix exception for {target_room}: {e}")
+        return False, str(e)
+
+
 def send_alert_mails(environment, alerts, resolved=False):
-    """Notify the given alerts via Telegram and/or Email according to configuration.
+    """Notify the given alerts via Telegram, Matrix and/or Email according to configuration.
 
     Throttling is per alert key (an alert about one server never masks an
     alert about another) and persisted on disk so that concurrent workers
@@ -608,23 +784,32 @@ def send_alert_mails(environment, alerts, resolved=False):
     if not alerts or not _is_send_emails_enabled(environment):
         return []
 
-    channel = _get_alert_channel(environment)
-    if channel == 'none':
+    active_channels = _get_active_channels(environment)
+    if not active_channels:
         return []
 
-    has_mail = _has_mail_config() and channel in ('email', 'both')
-    has_tg = _has_telegram_config(environment) and channel in ('telegram', 'both')
+    has_mail = _has_mail_config() and 'email' in active_channels
+    has_tg = _has_telegram_config(environment) and 'telegram' in active_channels
+    has_matrix = _has_matrix_config(environment) and 'matrix' in active_channels
 
-    if not has_mail and not has_tg:
+    if not has_mail and not has_tg and not has_matrix:
         return []
 
     now = time.time()
     mail_blocked = has_mail and (now < mail_backoff.get(environment, 0))
     tg_blocked = has_tg and (now < telegram_backoff.get(environment, 0))
+    matrix_blocked = has_matrix and (now < matrix_backoff.get(environment, 0))
 
-    if (has_mail and mail_blocked) and (not has_tg or tg_blocked):
-        return []
-    if (has_tg and tg_blocked) and (not has_mail or mail_blocked):
+    # If all configured channels are blocked by backoff, skip
+    ready_channels = []
+    if has_mail and not mail_blocked:
+        ready_channels.append('email')
+    if has_tg and not tg_blocked:
+        ready_channels.append('telegram')
+    if has_matrix and not matrix_blocked:
+        ready_channels.append('matrix')
+
+    if not ready_channels:
         return []
 
     repeat_seconds = max(_get_alert_repeat(environment), 0.0) * 60
@@ -661,6 +846,19 @@ def send_alert_mails(environment, alerts, resolved=False):
                     telegram_backoff[environment] = time.time() + TELEGRAM_RETRY_BACKOFF
                     print(f"❌ Error sending Telegram notification: {e}")
 
+            # Matrix send
+            if has_matrix and not matrix_blocked:
+                try:
+                    mat_plain, mat_html = _build_alert_matrix_message(to_send, environment, resolved=resolved)
+                    ok, _ = _matrix_send(mat_html, mat_plain, environment=environment)
+                    if ok:
+                        sent_any = True
+                    else:
+                        matrix_backoff[environment] = time.time() + MATRIX_RETRY_BACKOFF
+                except Exception as e:
+                    matrix_backoff[environment] = time.time() + MATRIX_RETRY_BACKOFF
+                    print(f"❌ Error sending Matrix notification: {e}")
+
             # Email send
             if has_mail and not mail_blocked:
                 try:
@@ -673,7 +871,7 @@ def send_alert_mails(environment, alerts, resolved=False):
                     mail_backoff[environment] = time.time() + MAIL_RETRY_BACKOFF
                     print(f"❌ Error sending notification email: {e} (retrying in {int(MAIL_RETRY_BACKOFF)}s)")
 
-            if not sent_any and (has_mail or has_tg):
+            if not sent_any and (has_mail or has_tg or has_matrix):
                 return []
 
             for alert in to_send:
@@ -692,6 +890,7 @@ def send_alert_mails(environment, alerts, resolved=False):
     except Exception as e:
         print(f"❌ Error in alert notifier: {e}")
         return []
+
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1119,10 +1318,12 @@ def get_widget_config(environment):
         'chart_adaptive_display': general_config.get('chart_adaptive_display', '0') == '0',
         'email_configured': _has_mail_config(),
         'telegram_configured': _has_telegram_config(environment),
+        'matrix_configured': _has_matrix_config(environment),
         'notifications_configured': _has_notification_config(environment),
         'alert_channel': _get_alert_channel(environment),
-        'telegram_active': bool(_has_telegram_config(environment) and _is_send_emails_enabled(environment) and _get_alert_channel(environment) in ('telegram', 'both')),
-        'email_active': bool(_has_mail_config() and _is_send_emails_enabled(environment) and _get_alert_channel(environment) in ('email', 'both')),
+        'telegram_active': bool(_has_telegram_config(environment) and _is_send_emails_enabled(environment) and 'telegram' in _get_active_channels(environment)),
+        'matrix_active': bool(_has_matrix_config(environment) and _is_send_emails_enabled(environment) and 'matrix' in _get_active_channels(environment)),
+        'email_active': bool(_has_mail_config() and _is_send_emails_enabled(environment) and 'email' in _get_active_channels(environment)),
         'thresholds': get_thresholds(environment),
         'alert_delay_minutes': _get_alert_delay(environment),
         'alert_email_min_severity': _get_alert_min_severity(environment),
@@ -2022,6 +2223,54 @@ def admin_test_telegram():
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
+@app.route('/admin/test-matrix', methods=['POST'])
+def admin_test_matrix():
+    if not _is_admin_enabled():
+        return jsonify({'success': False, 'message': 'Admin disabled'}), 403
+    if not _is_admin_authenticated():
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+
+    try:
+        data = request.get_json(force=True) or {}
+        hs = data.get('matrix_homeserver_url', '').strip() or config['general'].get('matrix_homeserver_url', '').strip()
+        room_id = data.get('matrix_room_id', '').strip() or config['general'].get('matrix_room_id', '').strip()
+        token = data.get('matrix_access_token', '').strip() or config['general'].get('matrix_access_token', '').strip()
+
+        if not hs or not room_id or not token:
+            return jsonify({'success': False, 'message': 'Missing Homeserver URL, Room ID, or Access Token.'}), 400
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        plain_text = (
+            f"🚀 Nedara Monitoring — Matrix Notification Test\n\n"
+            f"✅ Successfully connected to Matrix homeserver!\n"
+            f"Alert notifications will now be delivered to this room.\n\n"
+            f"⏱ {now_str}"
+        )
+        html_text = (
+            f"<h3>🚀 <b>Nedara Monitoring</b> — Matrix Notification Test</h3>"
+            f"<p>✅ <b>Successfully connected to Matrix homeserver!</b><br>"
+            f"Alert notifications will now be delivered to this room.</p>"
+            f"<p><small style='color:#94a3b8;'>⏱ {now_str}</small></p>"
+        )
+
+        ok, msg = _matrix_send(
+            html_text,
+            plain_text,
+            test_config={
+                'matrix_homeserver_url': hs,
+                'matrix_access_token': token,
+                'matrix_room_id': room_id,
+            }
+        )
+
+        if ok:
+            return jsonify({'success': True, 'message': 'Test message sent successfully to Matrix room!'})
+        else:
+            return jsonify({'success': False, 'message': f'Failed to send Matrix message: {msg}'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
 @app.route('/admin/logout')
 def admin_logout():
     session.pop('admin_authenticated', None)
@@ -2039,7 +2288,7 @@ def admin_save():
         data = request.get_json(force=True)
 
         # General settings
-        general_fields = ['display_name', 'refresh_rate', 'chart_history', 'chart_adaptive_display', 'debug', 'alert_channel', 'telegram_bot_token', 'telegram_chat_id']
+        general_fields = ['display_name', 'refresh_rate', 'chart_history', 'chart_adaptive_display', 'debug', 'alert_channel', 'telegram_bot_token', 'telegram_chat_id', 'matrix_homeserver_url', 'matrix_room_id']
         for field in general_fields:
             if field in data.get('general', {}):
                 config['general'][field] = str(data['general'][field])
@@ -2059,6 +2308,14 @@ def admin_save():
                 if field in tg_data:
                     config['general'][field] = str(tg_data[field]).strip()
 
+        # Matrix settings
+        if 'matrix' in data:
+            mat_data = data['matrix']
+            for field in ['matrix_homeserver_url', 'matrix_room_id', 'alert_channel']:
+                if field in mat_data and mat_data[field] is not None:
+                    config['general'][field] = str(mat_data[field]).strip()
+            if mat_data.get('matrix_access_token', '').strip():
+                config['general']['matrix_access_token'] = str(mat_data['matrix_access_token']).strip()
 
         # Alert thresholds (an empty field falls back to the built-in default)
         thresholds = {
@@ -2082,7 +2339,7 @@ def admin_save():
             'send_emails', 'send_notifications', 'alert_delay_minutes', 'alert_repeat_minutes',
             'alert_email_min_severity', 'alert_resolved_emails',
             'alert_sustain_seconds', 'alert_clear_seconds',
-            'telegram_chat_id', 'alert_channel',
+            'telegram_chat_id', 'matrix_room_id', 'alert_channel',
         ]
         for env, env_data in data.get('environments', {}).items():
             if env not in config:

@@ -133,6 +133,9 @@
         <button class="tab-btn" onclick="showTab('telegram', this)">
             <i class="fa-brands fa-telegram" aria-hidden="true"></i> Telegram
         </button>
+        <button class="tab-btn" onclick="showTab('matrix', this)">
+            <i class="fa-solid fa-comments" aria-hidden="true"></i> Matrix
+        </button>
         <button class="tab-btn" onclick="showTab('email', this)">
             <i class="fa-solid fa-envelope" aria-hidden="true"></i> Email
         </button>
@@ -234,11 +237,14 @@
                     <label class="field-label" for="alert_channel">Active Notification Channel</label>
                     <select class="field-input" id="alert_channel">
                         <option value="telegram" {% if config.general.get('alert_channel', 'telegram') == 'telegram' %}selected{% endif %}>Telegram only</option>
+                        <option value="matrix" {% if config.general.get('alert_channel') == 'matrix' %}selected{% endif %}>Matrix (Element) only</option>
+                        <option value="telegram,matrix" {% if config.general.get('alert_channel') == 'telegram,matrix' %}selected{% endif %}>Telegram &amp; Matrix</option>
                         <option value="email" {% if config.general.get('alert_channel') == 'email' %}selected{% endif %}>Email only</option>
-                        <option value="both" {% if config.general.get('alert_channel') == 'both' %}selected{% endif %}>Both (Email &amp; Telegram)</option>
+                        <option value="both" {% if config.general.get('alert_channel') == 'both' %}selected{% endif %}>Both (Telegram &amp; Email)</option>
+                        <option value="all" {% if config.general.get('alert_channel') == 'all' %}selected{% endif %}>All (Telegram, Matrix, Email)</option>
                         <option value="none" {% if config.general.get('alert_channel') == 'none' %}selected{% endif %}>None (Disabled)</option>
                     </select>
-                    <span class="field-hint">Select which channel receives alert notifications.</span>
+                    <span class="field-hint">Select which channel(s) receive alert notifications.</span>
                 </div>
             </div>
             <div style="margin-top:1.5rem;display:flex;gap:0.75rem;">
@@ -248,6 +254,53 @@
             </div>
         </div>
     </div>
+
+    <!-- ── TAB: MATRIX ── -->
+    <div id="tab-matrix" class="tab-pane">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-solid fa-comments admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Matrix (Element) notifications</span>
+            </div>
+            {% set matrix_ready = config.general.get('matrix_homeserver_url') and config.general.get('matrix_access_token') and config.general.get('matrix_room_id') and ('matrix' in config.general.get('alert_channel', '') or config.general.get('alert_channel') == 'all') %}
+            <div style="margin-bottom: 1.25rem; padding: 0.85rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; {% if matrix_ready %}background: var(--ok-soft, rgba(16,185,129,0.1)); border: 1px solid var(--ok-border, rgba(16,185,129,0.25)); color: var(--ok, #059669);{% else %}background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: var(--muted, #64748b);{% endif %}">
+                <i class="fa-solid {% if matrix_ready %}fa-circle-check{% else %}fa-circle-pause{% endif %}" style="font-size: 1.15rem;"></i>
+                <div>
+                    <strong style="display:block; font-size: 0.9rem;">Matrix Alerts: {% if matrix_ready %}ACTIVE{% else %}INACTIVE{% endif %}</strong>
+                    <span>{% if matrix_ready %}Alerts are dispatched to Matrix room <code>{{ config.general.get('matrix_room_id') }}</code> on <code>{{ config.general.get('matrix_homeserver_url') }}</code>.{% else %}Matrix alerts are disabled or incomplete (channel must include Matrix and Homeserver URL + Token + Room ID provided).{% endif %}</span>
+                </div>
+            </div>
+            <p class="admin-card-note">
+                Configure alerts via a Matrix homeserver (Conduit, Dendrite, Synapse) for Element and Matrix clients. Leave fields empty to disable Matrix alerts.
+            </p>
+            <div class="field-grid">
+                <div class="field">
+                    <label class="field-label" for="matrix_homeserver_url">Homeserver URL</label>
+                    <input class="field-input" type="text" id="matrix_homeserver_url" placeholder="http://192.168.1.10:8008 or https://matrix.nedara.local"
+                           value="{{ config.general.get('matrix_homeserver_url', '') }}">
+                    <span class="field-hint">Base URL of your Matrix homeserver (HTTP or HTTPS).</span>
+                </div>
+                <div class="field">
+                    <label class="field-label" for="matrix_room_id">Room ID / Alias</label>
+                    <input class="field-input" type="text" id="matrix_room_id" placeholder="!alerts:nedara.local or #alerts:nedara.local"
+                           value="{{ config.general.get('matrix_room_id', '') }}">
+                    <span class="field-hint">Matrix room ID (starting with !) or alias (starting with #).</span>
+                </div>
+                <div class="field">
+                    <label class="field-label" for="matrix_access_token">Access Token</label>
+                    <input class="field-input" type="password" id="matrix_access_token" placeholder="syt_..."
+                           value="{{ config.general.get('matrix_access_token', '') }}">
+                    <span class="field-hint">Access token for the Matrix account/bot.</span>
+                </div>
+            </div>
+            <div style="margin-top:1.5rem;display:flex;gap:0.75rem;">
+                <button type="button" class="btn btn-primary" onclick="testMatrix()" id="btn-test-matrix">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send test message
+                </button>
+            </div>
+        </div>
+    </div>
+
 
     <!-- ── TAB: EMAIL ── -->
     <div id="tab-email" class="tab-pane">
@@ -656,6 +709,42 @@
         }
     }
 
+    async function testMatrix() {
+        const btn = document.getElementById('btn-test-matrix');
+        const hs = document.getElementById('matrix_homeserver_url')?.value.trim();
+        const roomId = document.getElementById('matrix_room_id')?.value.trim();
+        const token = document.getElementById('matrix_access_token')?.value.trim();
+        if (!hs || !roomId) {
+            showToast('Please provide Homeserver URL and Room ID.', 'error');
+            return;
+        }
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending…';
+        try {
+            const resp = await fetch('/admin/test-matrix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    matrix_homeserver_url: hs,
+                    matrix_room_id: roomId,
+                    matrix_access_token: token
+                })
+            });
+            const res = await resp.json();
+            if (resp.ok && res.success) {
+                showToast(res.message, 'success');
+            } else {
+                showToast(res.message || 'Failed to send test message to Matrix.', 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+
     function showTab(name, btn) {
         document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('block'));
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -721,6 +810,12 @@
                 telegram_chat_id: document.getElementById('telegram_chat_id')?.value || '',
                 alert_channel: document.getElementById('alert_channel')?.value || 'telegram',
             },
+            matrix: {
+                matrix_homeserver_url: document.getElementById('matrix_homeserver_url')?.value || '',
+                matrix_room_id: document.getElementById('matrix_room_id')?.value || '',
+                matrix_access_token: document.getElementById('matrix_access_token')?.value || '',
+                alert_channel: document.getElementById('alert_channel')?.value || 'telegram',
+            },
             email: {
                 email_notif_smtp_server: document.getElementById('email_smtp_server')?.value || '',
                 email_notif_smtp_port: document.getElementById('email_smtp_port')?.value || '587',
@@ -754,10 +849,11 @@
             btn.disabled = false;
             if (data.success) {
                 showToast('Saved successfully', 'success');
-                ['pw_current', 'pw_new', 'pw_confirm', 'email_password'].forEach(id => {
+                ['pw_current', 'pw_new', 'pw_confirm', 'email_password', 'matrix_access_token'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.value = '';
                 });
+
                 document.querySelectorAll('.srv-field[data-field="password"]').forEach(el => { el.value = ''; });
             } else {
                 showToast(data.message || 'Save failed', 'error');
