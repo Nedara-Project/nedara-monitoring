@@ -50,7 +50,18 @@
                     <option value="{{ env }}">{{ env }}</option>
                     {% endfor %}
                 </select>
-                <span id="mail-indicator" class="topbar-mail-indicator" style="display:none" title="Email notifications active">✉ Mail</span>
+                <div id="notif-indicators" class="topbar-notif-group" title="Notification channels">
+                    <span id="indicator-telegram" class="notif-pill is-inactive" title="Telegram alerts: Inactive">
+                        <i class="fa-brands fa-telegram"></i>
+                        <span class="pill-label">Telegram</span>
+                        <span class="pill-dot"></span>
+                    </span>
+                    <span id="indicator-email" class="notif-pill is-inactive" title="Email alerts: Inactive">
+                        <i class="fa-solid fa-envelope"></i>
+                        <span class="pill-label">Email</span>
+                        <span class="pill-dot"></span>
+                    </span>
+                </div>
                 <button id="theme-toggle" class="btn-theme" title="Cycle theme: Auto → Light → Dark">
                     <span id="theme-icon">⊙</span>
                     <span id="theme-label">Auto</span>
@@ -68,6 +79,7 @@
                     <span class="panel-title">Active alerts</span>
                     <span id="alerts-chips" class="alerts-chips"></span>
                     <div class="alerts-toolbar">
+                        <span id="alerts-dispatch-badge" class="alerts-dispatch-badge" style="display:none;"></span>
                         <select id="alerts-severity-filter" class="filter-select" title="Minimum severity shown">
                             <option value="all">All severities</option>
                             <option value="critical">Critical only</option>

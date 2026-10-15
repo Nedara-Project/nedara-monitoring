@@ -130,6 +130,9 @@
         <button class="tab-btn active" onclick="showTab('general', this)">
             <i class="fa-solid fa-gear" aria-hidden="true"></i> General
         </button>
+        <button class="tab-btn" onclick="showTab('telegram', this)">
+            <i class="fa-brands fa-telegram" aria-hidden="true"></i> Telegram
+        </button>
         <button class="tab-btn" onclick="showTab('email', this)">
             <i class="fa-solid fa-envelope" aria-hidden="true"></i> Email
         </button>
@@ -195,12 +198,71 @@
         </div>
     </div>
 
+    <!-- ── TAB: TELEGRAM ── -->
+    <div id="tab-telegram" class="tab-pane">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <i class="fa-brands fa-telegram admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Telegram notifications</span>
+            </div>
+            {% set tg_ready = config.general.get('telegram_bot_token') and config.general.get('telegram_chat_id') and config.general.get('alert_channel', 'telegram') in ('telegram', 'both') %}
+            <div style="margin-bottom: 1.25rem; padding: 0.85rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; {% if tg_ready %}background: var(--ok-soft, rgba(16,185,129,0.1)); border: 1px solid var(--ok-border, rgba(16,185,129,0.25)); color: var(--ok, #059669);{% else %}background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: var(--muted, #64748b);{% endif %}">
+                <i class="fa-solid {% if tg_ready %}fa-circle-check{% else %}fa-circle-pause{% endif %}" style="font-size: 1.15rem;"></i>
+                <div>
+                    <strong style="display:block; font-size: 0.9rem;">Telegram Alerts: {% if tg_ready %}ACTIVE{% else %}INACTIVE{% endif %}</strong>
+                    <span>{% if tg_ready %}Alerts are dispatched to Telegram chat ID <code>{{ config.general.get('telegram_chat_id') }}</code>.{% else %}Telegram alerts are disabled or incomplete (channel must be set to Telegram/Both and token + chat ID provided).{% endif %}</span>
+                </div>
+            </div>
+            <p class="admin-card-note">
+                Configure alerts via Telegram Bot. Leave fields empty to disable Telegram alerts.
+                You can create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener" style="color:var(--color-primary);text-decoration:underline;">@BotFather</a> and retrieve your Chat ID with <a href="https://t.me/userinfobot" target="_blank" rel="noopener" style="color:var(--color-primary);text-decoration:underline;">@userinfobot</a>.
+            </p>
+            <div class="field-grid">
+                <div class="field">
+                    <label class="field-label" for="telegram_bot_token">Bot Token</label>
+                    <input class="field-input" type="text" id="telegram_bot_token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                           value="{{ config.general.get('telegram_bot_token', '') }}">
+                    <span class="field-hint">Token provided by @BotFather.</span>
+                </div>
+                <div class="field">
+                    <label class="field-label" for="telegram_chat_id">Chat ID / Group ID</label>
+                    <input class="field-input" type="text" id="telegram_chat_id" placeholder="12345678 or -100123456789"
+                           value="{{ config.general.get('telegram_chat_id', '') }}">
+                    <span class="field-hint">User ID or channel/group ID (comma-separated for multiple recipients).</span>
+                </div>
+                <div class="field">
+                    <label class="field-label" for="alert_channel">Active Notification Channel</label>
+                    <select class="field-input" id="alert_channel">
+                        <option value="telegram" {% if config.general.get('alert_channel', 'telegram') == 'telegram' %}selected{% endif %}>Telegram only</option>
+                        <option value="email" {% if config.general.get('alert_channel') == 'email' %}selected{% endif %}>Email only</option>
+                        <option value="both" {% if config.general.get('alert_channel') == 'both' %}selected{% endif %}>Both (Email &amp; Telegram)</option>
+                        <option value="none" {% if config.general.get('alert_channel') == 'none' %}selected{% endif %}>None (Disabled)</option>
+                    </select>
+                    <span class="field-hint">Select which channel receives alert notifications.</span>
+                </div>
+            </div>
+            <div style="margin-top:1.5rem;display:flex;gap:0.75rem;">
+                <button type="button" class="btn btn-primary" onclick="testTelegram()" id="btn-test-tg">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send test message
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ── TAB: EMAIL ── -->
     <div id="tab-email" class="tab-pane">
         <div class="admin-card">
             <div class="admin-card-header">
                 <i class="fa-solid fa-paper-plane admin-card-icon" aria-hidden="true"></i>
                 <span class="admin-card-title">SMTP server</span>
+            </div>
+            {% set mail_ready = config.general.get('email_notif_smtp_server') and config.general.get('email_notif_recipients') and config.general.get('alert_channel') in ('email', 'both') %}
+            <div style="margin-bottom: 1.25rem; padding: 0.85rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; {% if mail_ready %}background: var(--ok-soft, rgba(16,185,129,0.1)); border: 1px solid var(--ok-border, rgba(16,185,129,0.25)); color: var(--ok, #059669);{% else %}background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: var(--muted, #64748b);{% endif %}">
+                <i class="fa-solid {% if mail_ready %}fa-circle-check{% else %}fa-circle-pause{% endif %}" style="font-size: 1.15rem;"></i>
+                <div>
+                    <strong style="display:block; font-size: 0.9rem;">Email Alerts: {% if mail_ready %}ACTIVE{% else %}INACTIVE{% endif %}</strong>
+                    <span>{% if mail_ready %}Emails are sent via <code>{{ config.general.get('email_notif_smtp_server') }}</code> to <code>{{ config.general.get('email_notif_recipients') }}</code>.{% else %}Email alerts are inactive (channel set to Telegram only or missing SMTP server / recipients).{% endif %}</span>
+                </div>
             </div>
             <p class="admin-card-note">
                 Leave the server, port and recipients empty to disable email alerts entirely.
@@ -309,7 +371,7 @@
             </div>
             <p class="admin-card-note">
                 Unreachable hosts, HTTP errors and offline web applications are always critical — they have no threshold.
-                Every alert shows on the dashboard whatever these settings are; they only govern the emails.
+                Every alert shows on the dashboard whatever these settings are; they only govern notifications (Telegram / Email).
             </p>
             {% for env in environments %}
             {% set ecfg = config.environments.get(env, {}) %}
@@ -320,7 +382,7 @@
                 </div>
                 <div class="field-grid">
                     <div class="field">
-                        <span class="field-label">Send email alerts</span>
+                        <span class="field-label">Send alert notifications (Telegram / Email)</span>
                         <div class="field-toggle">
                             <label class="toggle">
                                 <input type="checkbox" class="env-send-emails" data-env="{{ env }}"
@@ -331,7 +393,7 @@
                         </div>
                     </div>
                     <div class="field">
-                        <span class="field-label">Send "resolved" emails</span>
+                        <span class="field-label">Send "resolved" notifications</span>
                         <div class="field-toggle">
                             <label class="toggle">
                                 <input type="checkbox" class="env-resolved-emails" data-env="{{ env }}"
@@ -342,7 +404,7 @@
                         </div>
                     </div>
                     <div class="field">
-                        <label class="field-label">Email from severity</label>
+                        <label class="field-label">Notify from severity</label>
                         <select class="env-min-severity field-input" data-env="{{ env }}">
                             <option value="critical" {% if ecfg.get('alert_email_min_severity', 'critical') != 'warning' %}selected{% endif %}>Critical only</option>
                             <option value="warning" {% if ecfg.get('alert_email_min_severity', 'critical') == 'warning' %}selected{% endif %}>Warning and critical</option>
@@ -360,7 +422,7 @@
                         <input type="number" class="env-alert-repeat field-input" data-env="{{ env }}"
                                min="1" max="1440" step="1" placeholder="60"
                                value="{{ ecfg.get('alert_repeat_minutes', '') }}">
-                        <span class="field-hint">Before the same, still-active alert is emailed again.</span>
+                        <span class="field-hint">Before the same, still-active alert is sent again.</span>
                     </div>
                     <div class="field">
                         <label class="field-label">Raise after / clear after (seconds)</label>
@@ -563,6 +625,37 @@
 <div id="toast"></div>
 
 <script>
+    async function testTelegram() {
+        const btn = document.getElementById('btn-test-tg');
+        const token = document.getElementById('telegram_bot_token')?.value.trim();
+        const chatId = document.getElementById('telegram_chat_id')?.value.trim();
+        if (!token || !chatId) {
+            showToast('Please provide both Bot Token and Chat ID.', 'error');
+            return;
+        }
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending…';
+        try {
+            const resp = await fetch('/admin/test-telegram', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegram_bot_token: token, telegram_chat_id: chatId })
+            });
+            const res = await resp.json();
+            if (resp.ok && res.success) {
+                showToast(res.message, 'success');
+            } else {
+                showToast(res.message || 'Failed to send test message.', 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+
     function showTab(name, btn) {
         document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('block'));
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -622,6 +715,11 @@
                 chart_history: document.getElementById('chart_history')?.value || '5000',
                 chart_adaptive_display: document.getElementById('chart_adaptive_display')?.checked ? '1' : '0',
                 debug: document.getElementById('debug')?.checked ? '1' : '0',
+            },
+            telegram: {
+                telegram_bot_token: document.getElementById('telegram_bot_token')?.value || '',
+                telegram_chat_id: document.getElementById('telegram_chat_id')?.value || '',
+                alert_channel: document.getElementById('alert_channel')?.value || 'telegram',
             },
             email: {
                 email_notif_smtp_server: document.getElementById('email_smtp_server')?.value || '',

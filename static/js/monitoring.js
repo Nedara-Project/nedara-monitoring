@@ -338,9 +338,43 @@ const Monitoring = Nedara.createWidget({
             if (sectionDetails) sectionDetails.classList.toggle('has-pgbouncer', !!data.show_pgbouncer_panel);
         }
 
-        // Mail notification indicator
-        const mailEl = document.getElementById('mail-indicator');
-        if (mailEl) mailEl.style.display = wc.email_configured ? '' : 'none';
+        // Notification indicators (Telegram & Email)
+        const tgPill = document.getElementById('indicator-telegram');
+        const mailPill = document.getElementById('indicator-email');
+        const tgActive = Boolean(wc.telegram_active);
+        const mailActive = Boolean(wc.email_active);
+
+        if (tgPill) {
+            tgPill.classList.toggle('is-active', tgActive);
+            tgPill.classList.toggle('is-inactive', !tgActive);
+            tgPill.title = tgActive
+                ? `Telegram Alerts: ACTIVE (${wc.alert_email_min_severity || 'critical'})`
+                : 'Telegram Alerts: INACTIVE (Disabled or unconfigured)';
+        }
+        if (mailPill) {
+            mailPill.classList.toggle('is-active', mailActive);
+            mailPill.classList.toggle('is-inactive', !mailActive);
+            mailPill.title = mailActive
+                ? `Email Alerts: ACTIVE (${wc.alert_email_min_severity || 'critical'})`
+                : 'Email Alerts: INACTIVE (Disabled or unconfigured)';
+        }
+
+        // Active alerts panel dispatch badge
+        const dispatchBadge = document.getElementById('alerts-dispatch-badge');
+        if (dispatchBadge) {
+            let activeChannels = [];
+            if (tgActive) activeChannels.push('Telegram');
+            if (mailActive) activeChannels.push('Email');
+            if (activeChannels.length > 0) {
+                dispatchBadge.style.display = 'inline-flex';
+                dispatchBadge.innerHTML = `<i class="fa-solid fa-paper-plane" style="font-size:0.65rem;"></i> Sent via: <b>${activeChannels.join(' + ')}</b>`;
+                dispatchBadge.title = `Alerts are dispatched to ${activeChannels.join(' and ')} (Severity: ${wc.alert_email_min_severity || 'critical'})`;
+            } else {
+                dispatchBadge.style.display = 'inline-flex';
+                dispatchBadge.innerHTML = `<i class="fa-solid fa-bell-slash" style="font-size:0.65rem;"></i> Notifications: <b>Muted</b>`;
+                dispatchBadge.title = 'No active notification channel for this environment.';
+            }
+        }
         if (pgPanel && sectionDetails) {
             pgPanel.style.display = data.show_postgres_panel ? '' : 'none';
             sectionDetails.classList.toggle('no-postgres', !data.show_postgres_panel);

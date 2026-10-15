@@ -30,6 +30,17 @@ secret_key = your-secret-app-key
 admin_enabled = 0
 admin_password =
 
+; ── Notification channel ──
+; alert_channel: telegram (default), email, both, or none
+alert_channel = telegram
+
+; ── Telegram notifications ──
+; Leave fields empty to disable Telegram alerts.
+; telegram_bot_token: token from @BotFather
+; telegram_chat_id: target chat ID (comma-separated for multiple chats/groups)
+telegram_bot_token =
+telegram_chat_id =
+
 ; ── Email notifications ──
 ; Leave all fields empty to disable email alerts.
 ; login/password may be left empty for a relay that requires no authentication.

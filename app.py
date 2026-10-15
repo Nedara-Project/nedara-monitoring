@@ -81,6 +81,7 @@ server_data_cache = {}    # {environment: data_dict}
 client_environments = {}  # {sid: environment}
 alert_state = {}          # {(environment, alert_key): state_dict}
 mail_backoff = {}         # {environment: epoch before which no send is retried}
+telegram_backoff = {}     # {environment: epoch before which no send is retried}
 TMP_DIR = os.path.join(DATA_DIR, "tmp")
 os.makedirs(TMP_DIR, exist_ok=True)
 
@@ -88,6 +89,7 @@ SEVERITY_ORDER = {'warning': 1, 'critical': 2}
 
 # Seconds to wait before retrying after an SMTP failure
 MAIL_RETRY_BACKOFF = 60.0
+TELEGRAM_RETRY_BACKOFF = 60.0
 
 # Alert thresholds. Every key below can be overridden globally in a
 # [thresholds] section, per environment (in the environment section) or per
@@ -130,9 +132,54 @@ def _reload_config():
 
 def _is_send_emails_enabled(environment):
     try:
+        if 'send_notifications' in config[environment]:
+            return config[environment].get('send_notifications', '1').strip() == '1'
         return config[environment].get('send_emails', '1').strip() == '1'
     except Exception:
         return True
+
+
+def _get_alert_channel(environment=None):
+    if environment and environment in config:
+        ch = config[environment].get('alert_channel', '').strip().lower()
+        if ch:
+            return ch
+    ch = config['general'].get('alert_channel', '').strip().lower()
+    if ch:
+        return ch
+    has_tg = _has_telegram_config(environment)
+    has_ml = _has_mail_config()
+    if has_tg and not has_ml:
+        return 'telegram'
+    if has_ml and not has_tg:
+        return 'email'
+    if has_tg and has_ml:
+        return 'both'
+    return 'telegram'
+
+
+def _has_telegram_config(environment=None):
+    general_config = config['general']
+    token = general_config.get('telegram_bot_token', '').strip()
+    chat_id = ''
+    if environment and environment in config:
+        chat_id = config[environment].get('telegram_chat_id', '').strip()
+    if not chat_id:
+        chat_id = general_config.get('telegram_chat_id', '').strip()
+    return bool(token and chat_id)
+
+
+def _has_notification_config(environment=None):
+    channel = _get_alert_channel(environment)
+    if channel == 'telegram':
+        return _has_telegram_config(environment)
+    elif channel == 'email':
+        return _has_mail_config()
+    elif channel == 'both':
+        return _has_telegram_config(environment) or _has_mail_config()
+    elif channel == 'none':
+        return False
+    return _has_telegram_config(environment) or _has_mail_config()
 
 
 def _env_float(environment, key, default):
@@ -452,19 +499,132 @@ def _smtp_send(subject, body):
     return True
 
 
+def _build_alert_telegram_message(alerts, environment, resolved=False):
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    lines = []
+
+    if resolved:
+        if len(alerts) == 1:
+            header = f"✅ <b>Nedara Monitoring [{html.escape(str(environment))}] — Alert Resolved</b>"
+        else:
+            header = f"✅ <b>Nedara Monitoring [{html.escape(str(environment))}] — {len(alerts)} Alerts Resolved</b>"
+    else:
+        has_critical = any(a.get('severity') == 'critical' for a in alerts)
+        icon = '🔴' if has_critical else '🟠'
+        level = 'Critical' if has_critical else 'Warning'
+        if len(alerts) == 1:
+            header = f"{icon} <b>Nedara Monitoring [{html.escape(str(environment))}] — {level} Alert</b>"
+        else:
+            header = f"{icon} <b>Nedara Monitoring [{html.escape(str(environment))}] — {len(alerts)} Active Alerts ({level})</b>"
+
+    lines.append(header)
+    lines.append("")
+
+    for a in alerts:
+        sev = a.get('severity', 'warning')
+        bullet = "✅" if resolved else ("🔴" if sev == 'critical' else "🟠")
+        target = html.escape(str(a.get('target', '—')))
+        label = html.escape(str(a.get('label', '—')))
+        title_msg = html.escape(str(a.get('title') or a.get('message', '')))
+
+        lines.append(f"{bullet} <b>{target}</b>: {label}")
+        if title_msg and title_msg != label:
+            lines.append(f"   <i>{title_msg}</i>")
+
+        details = []
+        if a.get('value') is not None:
+            val = a.get('value_display') or _fmt_metric(a.get('value'), a.get('unit', ''))
+            details.append(f"{'Last value' if resolved else 'Value'}: <b>{html.escape(str(val))}</b>")
+        if not resolved and a.get('threshold') is not None:
+            thr = a.get('threshold_display') or _fmt_metric(a.get('threshold'), a.get('unit', ''))
+            details.append(f"Threshold: {html.escape(str(thr))}")
+        if a.get('duration'):
+            dur = _fmt_duration(a.get('duration'))
+            details.append(f"Duration: {dur}")
+
+        if details:
+            lines.append("   " + " | ".join(details))
+
+        if a.get('detail'):
+            clean_det = html.escape(str(a.get('detail'))).strip()
+            if clean_det:
+                lines.append(f"   <code>{clean_det[:250]}</code>")
+        lines.append("")
+
+    lines.append(f"⏱ <i>{now_str}</i>")
+    nl = chr(10)
+    return nl.join(lines).strip()
+
+
+def _telegram_send(text, environment=None):
+    general_config = config['general']
+    token = general_config.get('telegram_bot_token', '').strip()
+    if not token:
+        return False
+
+    chat_id_raw = ''
+    if environment and environment in config:
+        chat_id_raw = config[environment].get('telegram_chat_id', '').strip()
+    if not chat_id_raw:
+        chat_id_raw = general_config.get('telegram_chat_id', '').strip()
+
+    chat_ids = [c.strip() for c in chat_id_raw.split(',') if c.strip()]
+    if not chat_ids:
+        return False
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    any_success = False
+
+    for cid in chat_ids:
+        try:
+            resp = requests.post(
+                url,
+                json={
+                    'chat_id': cid,
+                    'text': text,
+                    'parse_mode': 'HTML',
+                    'disable_web_page_preview': True,
+                },
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                any_success = True
+                print(f"✅ Telegram notification sent to {cid}")
+            else:
+                print(f"❌ Telegram send error to {cid}: HTTP {resp.status_code} - {resp.text}")
+        except Exception as e:
+            print(f"❌ Telegram exception for {cid}: {e}")
+
+    return any_success
+
+
 def send_alert_mails(environment, alerts, resolved=False):
-    """Email the given alerts as a single message.
+    """Notify the given alerts via Telegram and/or Email according to configuration.
 
     Throttling is per alert key (an alert about one server never masks an
     alert about another) and persisted on disk so that concurrent workers
     share it. Returns the list of alert keys actually notified.
     """
-    if not alerts or not _is_send_emails_enabled(environment) or not _has_mail_config():
+    if not alerts or not _is_send_emails_enabled(environment):
+        return []
+
+    channel = _get_alert_channel(environment)
+    if channel == 'none':
+        return []
+
+    has_mail = _has_mail_config() and channel in ('email', 'both')
+    has_tg = _has_telegram_config(environment) and channel in ('telegram', 'both')
+
+    if not has_mail and not has_tg:
         return []
 
     now = time.time()
-    # A failing SMTP server must not be retried on every collection cycle
-    if now < mail_backoff.get(environment, 0):
+    mail_blocked = has_mail and (now < mail_backoff.get(environment, 0))
+    tg_blocked = has_tg and (now < telegram_backoff.get(environment, 0))
+
+    if (has_mail and mail_blocked) and (not has_tg or tg_blocked):
+        return []
+    if (has_tg and tg_blocked) and (not has_mail or mail_blocked):
         return []
 
     repeat_seconds = max(_get_alert_repeat(environment), 0.0) * 60
@@ -487,14 +647,37 @@ def send_alert_mails(environment, alerts, resolved=False):
             if not to_send:
                 return []
 
-            _smtp_send(
-                _alert_mail_subject(to_send, environment, resolved=resolved),
-                _build_alert_mail_body(to_send, environment, resolved=resolved),
-            )
+            sent_any = False
+
+            # Telegram send
+            if has_tg and not tg_blocked:
+                try:
+                    tg_msg = _build_alert_telegram_message(to_send, environment, resolved=resolved)
+                    if _telegram_send(tg_msg, environment=environment):
+                        sent_any = True
+                    else:
+                        telegram_backoff[environment] = time.time() + TELEGRAM_RETRY_BACKOFF
+                except Exception as e:
+                    telegram_backoff[environment] = time.time() + TELEGRAM_RETRY_BACKOFF
+                    print(f"❌ Error sending Telegram notification: {e}")
+
+            # Email send
+            if has_mail and not mail_blocked:
+                try:
+                    _smtp_send(
+                        _alert_mail_subject(to_send, environment, resolved=resolved),
+                        _build_alert_mail_body(to_send, environment, resolved=resolved),
+                    )
+                    sent_any = True
+                except Exception as e:
+                    mail_backoff[environment] = time.time() + MAIL_RETRY_BACKOFF
+                    print(f"❌ Error sending notification email: {e} (retrying in {int(MAIL_RETRY_BACKOFF)}s)")
+
+            if not sent_any and (has_mail or has_tg):
+                return []
 
             for alert in to_send:
                 if resolved:
-                    # A resolved incident starts over: drop its throttle entry.
                     state.pop(alert['key'], None)
                     state[f"resolved:{alert['key']}"] = now
                 else:
@@ -507,9 +690,7 @@ def send_alert_mails(environment, alerts, resolved=False):
             return [alert['key'] for alert in to_send]
 
     except Exception as e:
-        mail_backoff[environment] = time.time() + MAIL_RETRY_BACKOFF
-        print(f"❌ Error sending notification email: {e} "
-              f"(retrying in {int(MAIL_RETRY_BACKOFF)}s)")
+        print(f"❌ Error in alert notifier: {e}")
         return []
 
 
@@ -937,6 +1118,11 @@ def get_widget_config(environment):
         'chart_info': {},
         'chart_adaptive_display': general_config.get('chart_adaptive_display', '0') == '0',
         'email_configured': _has_mail_config(),
+        'telegram_configured': _has_telegram_config(environment),
+        'notifications_configured': _has_notification_config(environment),
+        'alert_channel': _get_alert_channel(environment),
+        'telegram_active': bool(_has_telegram_config(environment) and _is_send_emails_enabled(environment) and _get_alert_channel(environment) in ('telegram', 'both')),
+        'email_active': bool(_has_mail_config() and _is_send_emails_enabled(environment) and _get_alert_channel(environment) in ('email', 'both')),
         'thresholds': get_thresholds(environment),
         'alert_delay_minutes': _get_alert_delay(environment),
         'alert_email_min_severity': _get_alert_min_severity(environment),
@@ -1765,6 +1951,77 @@ def admin_setup():
     return redirect(url_for('admin_index'))
 
 
+@app.route('/admin/test-telegram', methods=['POST'])
+def admin_test_telegram():
+    if not _is_admin_enabled():
+        return jsonify({'success': False, 'message': 'Admin disabled'}), 403
+    if not _is_admin_authenticated():
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+
+    try:
+        data = request.get_json(force=True) or {}
+        token = data.get('telegram_bot_token', '').strip() or config['general'].get('telegram_bot_token', '').strip()
+        chat_id = data.get('telegram_chat_id', '').strip() or config['general'].get('telegram_chat_id', '').strip()
+
+        if not token or not chat_id:
+            return jsonify({'success': False, 'message': 'Missing Bot Token or Chat ID.'}), 400
+
+        chat_ids = [c.strip() for c in chat_id.split(',') if c.strip()]
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        errors = []
+        successes = 0
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        text = (
+            f"🚀 <b>Nedara Monitoring</b> — Notification Test\n\n"
+            f"✅ Successfully connected to Telegram bot!\n"
+            f"Alert notifications will now be delivered to this chat.\n\n"
+            f"⏱ <i>{now_str}</i>"
+        )
+
+        for cid in chat_ids:
+            try:
+                resp = requests.post(
+                    url,
+                    json={
+                        'chat_id': cid,
+                        'text': text,
+                        'parse_mode': 'HTML',
+                        'disable_web_page_preview': True,
+                    },
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    successes += 1
+                else:
+                    err_desc = resp.text
+                    try:
+                        err_desc = resp.json().get('description', resp.text)
+                    except Exception:
+                        pass
+                    if resp.status_code == 401:
+                        errors.append(f"Invalid or revoked Bot Token ({err_desc})")
+                    elif resp.status_code == 403:
+                        errors.append(f"Forbidden: Please open @nedara_notifier_bot and send /start first ({err_desc})")
+                    elif resp.status_code == 400 and 'chat not found' in err_desc.lower():
+                        errors.append(f"Chat ID {cid} not found. Please start the bot with /start first ({err_desc})")
+                    else:
+                        errors.append(f"{cid}: HTTP {resp.status_code} - {err_desc}")
+                    print(f"❌ Test message to {cid} failed: HTTP {resp.status_code} ({err_desc})")
+            except Exception as e:
+                errors.append(f"{cid}: {str(e)}")
+                print(f"❌ Test message to {cid} exception: {e}")
+
+        if successes > 0 and not errors:
+            return jsonify({'success': True, 'message': f'Test message sent successfully ({successes} recipient(s))!'})
+        elif successes > 0 and errors:
+            return jsonify({'success': True, 'message': f'Sent to {successes} recipient(s), but errors occurred for: {"; ".join(errors)}'})
+        else:
+            return jsonify({'success': False, 'message': f'Failed to send Telegram message: {"; ".join(errors)}'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
+
+
 @app.route('/admin/logout')
 def admin_logout():
     session.pop('admin_authenticated', None)
@@ -1782,7 +2039,7 @@ def admin_save():
         data = request.get_json(force=True)
 
         # General settings
-        general_fields = ['display_name', 'refresh_rate', 'chart_history', 'chart_adaptive_display', 'debug']
+        general_fields = ['display_name', 'refresh_rate', 'chart_history', 'chart_adaptive_display', 'debug', 'alert_channel', 'telegram_bot_token', 'telegram_chat_id']
         for field in general_fields:
             if field in data.get('general', {}):
                 config['general'][field] = str(data['general'][field])
@@ -1794,6 +2051,14 @@ def admin_save():
                 config['general'][field] = str(data['email'][field])
         if data.get('email', {}).get('email_notif_password', '').strip():
             config['general']['email_notif_password'] = data['email']['email_notif_password']
+
+        # Telegram settings
+        if 'telegram' in data:
+            tg_data = data['telegram']
+            for field in ['telegram_bot_token', 'telegram_chat_id', 'alert_channel']:
+                if field in tg_data:
+                    config['general'][field] = str(tg_data[field]).strip()
+
 
         # Alert thresholds (an empty field falls back to the built-in default)
         thresholds = {
@@ -1814,9 +2079,10 @@ def admin_save():
 
         # Per-environment settings
         env_alert_fields = [
-            'send_emails', 'alert_delay_minutes', 'alert_repeat_minutes',
+            'send_emails', 'send_notifications', 'alert_delay_minutes', 'alert_repeat_minutes',
             'alert_email_min_severity', 'alert_resolved_emails',
             'alert_sustain_seconds', 'alert_clear_seconds',
+            'telegram_chat_id', 'alert_channel',
         ]
         for env, env_data in data.get('environments', {}).items():
             if env not in config:

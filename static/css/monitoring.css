@@ -848,13 +848,66 @@ button.active {
 .proc-badge.value-medium { background: rgba(245, 158, 11, 0.12); color: var(--warn); }
 .proc-badge.value-high   { background: rgba(239, 68, 68, 0.12);  color: var(--crit); }
 
-/* Mail notification indicator in topbar */
-.topbar-mail-indicator {
-    color: var(--ok); cursor: default;
-    display: inline-flex; align-items: center;
-    gap: 0.3rem; font-size: 0.7rem; font-weight: 600;
-    background: var(--ok-soft); border: 1px solid var(--ok-border);
-    border-radius: 9999px; padding: 2px 8px; white-space: nowrap;
+/* Topbar notification indicator pills */
+.topbar-notif-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.notif-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    padding: 2.5px 8px;
+    white-space: nowrap;
+    cursor: default;
+    user-select: none;
+    transition: all 0.2s ease;
+}
+.notif-pill.is-active {
+    background: var(--ok-soft, rgba(16, 185, 129, 0.1));
+    color: var(--ok, #059669);
+    border: 1px solid var(--ok-border, rgba(16, 185, 129, 0.25));
+}
+.notif-pill.is-inactive {
+    background: rgba(148, 163, 184, 0.08);
+    color: var(--muted, #64748b);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    opacity: 0.7;
+}
+.notif-pill .pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.notif-pill.is-active .pill-dot {
+    background: var(--ok-dot, #10b981);
+    box-shadow: 0 0 5px rgba(16, 185, 129, 0.7);
+}
+.notif-pill.is-inactive .pill-dot {
+    background: #94a3b8;
+}
+
+/* Alerts card dispatch status badge */
+.alerts-dispatch-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    color: var(--accent, #6366f1);
+}
+.alerts-dispatch-badge b {
+    color: var(--text-strong, #0f172a);
+    font-weight: 700;
 }
 
 /* ============================================================
@@ -928,8 +981,9 @@ button.active {
         gap: 0.5rem;
     }
     /* Hide time and mail indicator — not critical on mobile */
-    .topbar-time,
-    .topbar-mail-indicator { display: none !important; }
+    .topbar-time { display: none !important; }
+    .notif-pill .pill-label { display: none; }
+    .notif-pill { padding: 3px 6px; }
     /* Limit env selector width so it doesn't push other controls off */
     #environment-selector { max-width: 130px; }
 
