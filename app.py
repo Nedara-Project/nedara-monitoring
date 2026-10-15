@@ -2106,9 +2106,21 @@ def admin_index():
             if sname in config:
                 cfg['servers'][sname] = dict(config[sname])
 
+    active_channels = _get_active_channels()
+    notif_status = {
+        'telegram_configured': _has_telegram_config(),
+        'telegram_active': 'telegram' in active_channels,
+        'matrix_configured': _has_matrix_config(),
+        'matrix_active': 'matrix' in active_channels,
+        'email_configured': _has_mail_config(),
+        'email_active': 'email' in active_channels,
+        'alert_channel': _get_alert_channel(),
+        'active_channels': active_channels,
+    }
+
     return render_template(
         'admin.html', state='admin', config=cfg, environments=envs, error=None,
-        default_thresholds=DEFAULT_THRESHOLDS,
+        default_thresholds=DEFAULT_THRESHOLDS, notif_status=notif_status,
     )
 
 
@@ -2271,6 +2283,60 @@ def admin_test_matrix():
         return jsonify({'success': False, 'message': f'Error: {str(e)}'}), 500
 
 
+@app.route('/admin/test-email', methods=['POST'])
+def admin_test_email():
+    if not _is_admin_enabled():
+        return jsonify({'success': False, 'message': 'Admin disabled'}), 403
+    if not _is_admin_authenticated():
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+
+    try:
+        data = request.get_json(force=True) or {}
+        server_host = data.get('email_smtp_server', '').strip() or config['general'].get('email_notif_smtp_server', '').strip()
+        port_raw = data.get('email_smtp_port', '').strip() or config['general'].get('email_notif_smtp_port', '587').strip()
+        login = data.get('email_login', '').strip() or config['general'].get('email_notif_login', '').strip()
+        pw = data.get('email_password', '').strip() or config['general'].get('email_notif_password', '').strip()
+        recipients = data.get('email_recipients', '').strip() or config['general'].get('email_notif_recipients', '').strip()
+
+        if not server_host or not recipients:
+            return jsonify({'success': False, 'message': 'Missing SMTP Server or Recipients.'}), 400
+
+        try:
+            port = int(port_raw)
+        except ValueError:
+            port = 587
+
+        recip_list = [e.strip() for e in recipients.split(',') if e.strip()]
+        if not recip_list:
+            return jsonify({'success': False, 'message': 'No valid recipient email address found.'}), 400
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        msg = MIMEMultipart('alternative')
+        msg['From'] = login or 'nedara-monitoring@localhost'
+        msg['To'] = ', '.join(recip_list)
+        msg['Subject'] = '🚀 Nedara Monitoring — Email Test Notification'
+        body = (
+            f"<h3>🚀 <b>Nedara Monitoring</b> — SMTP Notification Test</h3>"
+            f"<p>✅ <b>SMTP configuration is valid!</b><br>"
+            f"Alert notifications will be delivered to: <code>{', '.join(recip_list)}</code>.</p>"
+            f"<p><small style='color:#94a3b8;'>⏱ {now_str}</small></p>"
+        )
+        msg.attach(MIMEText(body, 'html', 'utf-8'))
+
+        with smtplib.SMTP(host=server_host, port=port) as server:
+            server.ehlo()
+            if server.has_extn('starttls'):
+                server.starttls()
+                server.ehlo()
+            if login and pw:
+                server.login(login, pw)
+            server.sendmail(msg['From'], recip_list, msg.as_string())
+
+        return jsonify({'success': True, 'message': f'Test email sent successfully to {", ".join(recip_list)}!'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'SMTP Error: {str(e)}'}), 500
+
+
 @app.route('/admin/logout')
 def admin_logout():
     session.pop('admin_authenticated', None)
@@ -2301,17 +2367,23 @@ def admin_save():
         if data.get('email', {}).get('email_notif_password', '').strip():
             config['general']['email_notif_password'] = data['email']['email_notif_password']
 
+        # Notifications settings (routing master switch)
+        if 'notifications' in data and 'alert_channel' in data['notifications']:
+            config['general']['alert_channel'] = str(data['notifications']['alert_channel']).strip()
+        elif 'alert_channel' in data:
+            config['general']['alert_channel'] = str(data['alert_channel']).strip()
+
         # Telegram settings
         if 'telegram' in data:
             tg_data = data['telegram']
-            for field in ['telegram_bot_token', 'telegram_chat_id', 'alert_channel']:
+            for field in ['telegram_bot_token', 'telegram_chat_id']:
                 if field in tg_data:
                     config['general'][field] = str(tg_data[field]).strip()
 
         # Matrix settings
         if 'matrix' in data:
             mat_data = data['matrix']
-            for field in ['matrix_homeserver_url', 'matrix_room_id', 'alert_channel']:
+            for field in ['matrix_homeserver_url', 'matrix_room_id']:
                 if field in mat_data and mat_data[field] is not None:
                     config['general'][field] = str(mat_data[field]).strip()
             if mat_data.get('matrix_access_token', '').strip():

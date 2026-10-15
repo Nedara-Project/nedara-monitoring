@@ -130,14 +130,15 @@
         <button class="tab-btn active" onclick="showTab('general', this)">
             <i class="fa-solid fa-gear" aria-hidden="true"></i> General
         </button>
-        <button class="tab-btn" onclick="showTab('telegram', this)">
-            <i class="fa-brands fa-telegram" aria-hidden="true"></i> Telegram
-        </button>
-        <button class="tab-btn" onclick="showTab('matrix', this)">
-            <i class="fa-solid fa-comments" aria-hidden="true"></i> Matrix
-        </button>
-        <button class="tab-btn" onclick="showTab('email', this)">
-            <i class="fa-solid fa-envelope" aria-hidden="true"></i> Email
+        <button class="tab-btn" id="tab-btn-notifications" onclick="showTab('notifications', this)">
+            <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Notifications
+            <span class="tab-pill-badge" id="tab-badge-notif">
+                {% if notif_status.active_channels %}
+                    {{ notif_status.active_channels | join(' + ') | title }}
+                {% else %}
+                    None
+                {% endif %}
+            </span>
         </button>
         <button class="tab-btn" onclick="showTab('alerts', this)">
             <i class="fa-solid fa-bell" aria-hidden="true"></i> Alerts
@@ -201,50 +202,172 @@
         </div>
     </div>
 
-    <!-- ── TAB: TELEGRAM ── -->
-    <div id="tab-telegram" class="tab-pane">
-        <div class="admin-card">
+    <!-- ── TAB: NOTIFICATIONS (UNIFIED) ── -->
+    <div id="tab-notifications" class="tab-pane">
+
+        <!-- Master Channel Routing & Dispatch Card -->
+        <div class="admin-card notif-master-card">
             <div class="admin-card-header">
-                <i class="fa-brands fa-telegram admin-card-icon" aria-hidden="true"></i>
-                <span class="admin-card-title">Telegram notifications</span>
-            </div>
-            {% set tg_ready = config.general.get('telegram_bot_token') and config.general.get('telegram_chat_id') and config.general.get('alert_channel', 'telegram') in ('telegram', 'both') %}
-            <div style="margin-bottom: 1.25rem; padding: 0.85rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; {% if tg_ready %}background: var(--ok-soft, rgba(16,185,129,0.1)); border: 1px solid var(--ok-border, rgba(16,185,129,0.25)); color: var(--ok, #059669);{% else %}background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: var(--muted, #64748b);{% endif %}">
-                <i class="fa-solid {% if tg_ready %}fa-circle-check{% else %}fa-circle-pause{% endif %}" style="font-size: 1.15rem;"></i>
-                <div>
-                    <strong style="display:block; font-size: 0.9rem;">Telegram Alerts: {% if tg_ready %}ACTIVE{% else %}INACTIVE{% endif %}</strong>
-                    <span>{% if tg_ready %}Alerts are dispatched to Telegram chat ID <code>{{ config.general.get('telegram_chat_id') }}</code>.{% else %}Telegram alerts are disabled or incomplete (channel must be set to Telegram/Both and token + chat ID provided).{% endif %}</span>
+                <i class="fa-solid fa-route admin-card-icon" aria-hidden="true"></i>
+                <div style="display:flex; flex-direction:column; gap:0.2rem;">
+                    <span class="admin-card-title">Alert Notification Channels</span>
+                    <span style="font-size:0.75rem; color:var(--muted);">
+                        Select which delivery channels receive alerts (critical, warning, and resolved notifications). Multiple channels can run simultaneously.
+                    </span>
                 </div>
             </div>
+
+            <!-- Visual Multi-Channel Toggles Grid -->
+            <div class="notif-channels-grid">
+                <!-- Telegram Toggle Card -->
+                <div class="notif-channel-tile {% if 'telegram' in notif_status.active_channels %}is-enabled{% endif %}" id="tile-channel-telegram" onclick="toggleChannelFromTile('telegram', event)">
+                    <div class="channel-tile-top">
+                        <div class="channel-tile-icon tg"><i class="fa-brands fa-telegram"></i></div>
+                        <div class="channel-tile-info">
+                            <span class="channel-tile-name">Telegram</span>
+                            <div class="channel-tile-badge" id="badge-tile-telegram">
+                                {% if notif_status.telegram_active %}
+                                    <span class="chip chip-ok"><i class="fa-solid fa-circle-check"></i> Active</span>
+                                {% elif notif_status.telegram_configured %}
+                                    <span class="chip chip-warn"><i class="fa-solid fa-circle-pause"></i> Disabled</span>
+                                {% else %}
+                                    <span class="chip chip-muted"><i class="fa-solid fa-circle-info"></i> Incomplete</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="field-toggle">
+                            <label class="toggle" onclick="event.stopPropagation()">
+                                <input type="checkbox" id="chk-channel-telegram"
+                                       {% if 'telegram' in notif_status.active_channels %}checked{% endif %}
+                                       onchange="syncNotificationChannels()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="channel-tile-desc">
+                        Instant bot alerts sent directly to user or group chat IDs.
+                    </div>
+                </div>
+
+                <!-- Matrix Toggle Card -->
+                <div class="notif-channel-tile {% if 'matrix' in notif_status.active_channels %}is-enabled{% endif %}" id="tile-channel-matrix" onclick="toggleChannelFromTile('matrix', event)">
+                    <div class="channel-tile-top">
+                        <div class="channel-tile-icon matrix"><i class="fa-solid fa-comments"></i></div>
+                        <div class="channel-tile-info">
+                            <span class="channel-tile-name">Matrix (Element)</span>
+                            <div class="channel-tile-badge" id="badge-tile-matrix">
+                                {% if notif_status.matrix_active %}
+                                    <span class="chip chip-ok"><i class="fa-solid fa-circle-check"></i> Active</span>
+                                {% elif notif_status.matrix_configured %}
+                                    <span class="chip chip-warn"><i class="fa-solid fa-circle-pause"></i> Disabled</span>
+                                {% else %}
+                                    <span class="chip chip-muted"><i class="fa-solid fa-circle-info"></i> Incomplete</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="field-toggle">
+                            <label class="toggle" onclick="event.stopPropagation()">
+                                <input type="checkbox" id="chk-channel-matrix"
+                                       {% if 'matrix' in notif_status.active_channels %}checked{% endif %}
+                                       onchange="syncNotificationChannels()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="channel-tile-desc">
+                        Decentralized room alerts via Matrix Conduit / Element Web & Mobile.
+                    </div>
+                </div>
+
+                <!-- Email Toggle Card -->
+                <div class="notif-channel-tile {% if 'email' in notif_status.active_channels %}is-enabled{% endif %}" id="tile-channel-email" onclick="toggleChannelFromTile('email', event)">
+                    <div class="channel-tile-top">
+                        <div class="channel-tile-icon email"><i class="fa-solid fa-envelope"></i></div>
+                        <div class="channel-tile-info">
+                            <span class="channel-tile-name">Email (SMTP)</span>
+                            <div class="channel-tile-badge" id="badge-tile-email">
+                                {% if notif_status.email_active %}
+                                    <span class="chip chip-ok"><i class="fa-solid fa-circle-check"></i> Active</span>
+                                {% elif notif_status.email_configured %}
+                                    <span class="chip chip-warn"><i class="fa-solid fa-circle-pause"></i> Disabled</span>
+                                {% else %}
+                                    <span class="chip chip-muted"><i class="fa-solid fa-circle-info"></i> Incomplete</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="field-toggle">
+                            <label class="toggle" onclick="event.stopPropagation()">
+                                <input type="checkbox" id="chk-channel-email"
+                                       {% if 'email' in notif_status.active_channels %}checked{% endif %}
+                                       onchange="syncNotificationChannels()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="channel-tile-desc">
+                        Email digests and incident notices via standard SMTP relay.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Routing Summary Bar -->
+            <div class="notif-summary-bar" id="notif-summary-bar">
+                <i class="fa-solid fa-paper-plane" style="color:var(--accent); font-size:1rem;"></i>
+                <div class="notif-summary-content">
+                    <span class="notif-summary-title">Active Dispatch Pipeline:</span>
+                    <span class="notif-summary-text" id="notif-summary-text">
+                        Initialising...
+                    </span>
+                </div>
+                <input type="hidden" id="alert_channel" value="{{ notif_status.alert_channel }}">
+            </div>
+        </div>
+
+        <!-- Sub-navigation filter pills -->
+        <div class="notif-subnav-bar">
+            <span class="notif-subnav-label"><i class="fa-solid fa-sliders"></i> Filter view:</span>
+            <button type="button" class="notif-subnav-btn active" data-target="all" onclick="filterNotifCards('all', this)">
+                <i class="fa-solid fa-layer-group"></i> All Channels
+            </button>
+            <button type="button" class="notif-subnav-btn" data-target="telegram" onclick="filterNotifCards('telegram', this)">
+                <i class="fa-brands fa-telegram"></i> Telegram
+            </button>
+            <button type="button" class="notif-subnav-btn" data-target="matrix" onclick="filterNotifCards('matrix', this)">
+                <i class="fa-solid fa-comments"></i> Matrix
+            </button>
+            <button type="button" class="notif-subnav-btn" data-target="email" onclick="filterNotifCards('email', this)">
+                <i class="fa-solid fa-envelope"></i> Email
+            </button>
+        </div>
+
+        <!-- ── CARD: TELEGRAM ── -->
+        <div class="admin-card notif-card" id="card-notif-telegram">
+            <div class="admin-card-header">
+                <i class="fa-brands fa-telegram admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Telegram Notifications</span>
+                <div class="header-right-chip" id="chip-header-tg"></div>
+            </div>
+
+            <div class="notif-status-banner" id="banner-tg"></div>
+
             <p class="admin-card-note">
-                Configure alerts via Telegram Bot. Leave fields empty to disable Telegram alerts.
-                You can create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener" style="color:var(--color-primary);text-decoration:underline;">@BotFather</a> and retrieve your Chat ID with <a href="https://t.me/userinfobot" target="_blank" rel="noopener" style="color:var(--color-primary);text-decoration:underline;">@userinfobot</a>.
+                Instant alert notifications delivered straight to your Telegram account or private group.
             </p>
             <div class="field-grid">
                 <div class="field">
                     <label class="field-label" for="telegram_bot_token">Bot Token</label>
-                    <input class="field-input" type="text" id="telegram_bot_token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
-                           value="{{ config.general.get('telegram_bot_token', '') }}">
+                    <input class="field-input" type="password" id="telegram_bot_token"
+                           placeholder="{% if config.general.get('telegram_bot_token') %}•••••••••••• (configured, leave empty to keep){% else %}8674005133:AAH...{% endif %}"
+                           value="{{ config.general.get('telegram_bot_token', '') }}"
+                           oninput="updateConfigFieldState()">
                     <span class="field-hint">Token provided by @BotFather.</span>
                 </div>
                 <div class="field">
                     <label class="field-label" for="telegram_chat_id">Chat ID / Group ID</label>
                     <input class="field-input" type="text" id="telegram_chat_id" placeholder="12345678 or -100123456789"
-                           value="{{ config.general.get('telegram_chat_id', '') }}">
+                           value="{{ config.general.get('telegram_chat_id', '') }}"
+                           oninput="updateConfigFieldState()">
                     <span class="field-hint">User ID or channel/group ID (comma-separated for multiple recipients).</span>
-                </div>
-                <div class="field">
-                    <label class="field-label" for="alert_channel">Active Notification Channel</label>
-                    <select class="field-input" id="alert_channel">
-                        <option value="telegram" {% if config.general.get('alert_channel', 'telegram') == 'telegram' %}selected{% endif %}>Telegram only</option>
-                        <option value="matrix" {% if config.general.get('alert_channel') == 'matrix' %}selected{% endif %}>Matrix (Element) only</option>
-                        <option value="telegram,matrix" {% if config.general.get('alert_channel') == 'telegram,matrix' %}selected{% endif %}>Telegram &amp; Matrix</option>
-                        <option value="email" {% if config.general.get('alert_channel') == 'email' %}selected{% endif %}>Email only</option>
-                        <option value="both" {% if config.general.get('alert_channel') == 'both' %}selected{% endif %}>Both (Telegram &amp; Email)</option>
-                        <option value="all" {% if config.general.get('alert_channel') == 'all' %}selected{% endif %}>All (Telegram, Matrix, Email)</option>
-                        <option value="none" {% if config.general.get('alert_channel') == 'none' %}selected{% endif %}>None (Disabled)</option>
-                    </select>
-                    <span class="field-hint">Select which channel(s) receive alert notifications.</span>
                 </div>
             </div>
             <div style="margin-top:1.5rem;display:flex;gap:0.75rem;">
@@ -253,44 +376,42 @@
                 </button>
             </div>
         </div>
-    </div>
 
-    <!-- ── TAB: MATRIX ── -->
-    <div id="tab-matrix" class="tab-pane">
-        <div class="admin-card">
+        <!-- ── CARD: MATRIX (ELEMENT) ── -->
+        <div class="admin-card notif-card" id="card-notif-matrix">
             <div class="admin-card-header">
                 <i class="fa-solid fa-comments admin-card-icon" aria-hidden="true"></i>
-                <span class="admin-card-title">Matrix (Element) notifications</span>
+                <span class="admin-card-title">Matrix (Element) Notifications</span>
+                <div class="header-right-chip" id="chip-header-matrix"></div>
             </div>
-            {% set matrix_ready = config.general.get('matrix_homeserver_url') and config.general.get('matrix_access_token') and config.general.get('matrix_room_id') and ('matrix' in config.general.get('alert_channel', '') or config.general.get('alert_channel') == 'all') %}
-            <div style="margin-bottom: 1.25rem; padding: 0.85rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; {% if matrix_ready %}background: var(--ok-soft, rgba(16,185,129,0.1)); border: 1px solid var(--ok-border, rgba(16,185,129,0.25)); color: var(--ok, #059669);{% else %}background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: var(--muted, #64748b);{% endif %}">
-                <i class="fa-solid {% if matrix_ready %}fa-circle-check{% else %}fa-circle-pause{% endif %}" style="font-size: 1.15rem;"></i>
-                <div>
-                    <strong style="display:block; font-size: 0.9rem;">Matrix Alerts: {% if matrix_ready %}ACTIVE{% else %}INACTIVE{% endif %}</strong>
-                    <span>{% if matrix_ready %}Alerts are dispatched to Matrix room <code>{{ config.general.get('matrix_room_id') }}</code> on <code>{{ config.general.get('matrix_homeserver_url') }}</code>.{% else %}Matrix alerts are disabled or incomplete (channel must include Matrix and Homeserver URL + Token + Room ID provided).{% endif %}</span>
-                </div>
-            </div>
+
+            <div class="notif-status-banner" id="banner-matrix"></div>
+
             <p class="admin-card-note">
                 Configure alerts via a Matrix homeserver (Conduit, Dendrite, Synapse) for Element and Matrix clients. Leave fields empty to disable Matrix alerts.
             </p>
             <div class="field-grid">
                 <div class="field">
                     <label class="field-label" for="matrix_homeserver_url">Homeserver URL</label>
-                    <input class="field-input" type="text" id="matrix_homeserver_url" placeholder="http://192.168.1.10:8008 or https://matrix.nedara.local"
-                           value="{{ config.general.get('matrix_homeserver_url', '') }}">
+                    <input class="field-input" type="text" id="matrix_homeserver_url" placeholder="https://matrix.nedara.org or http://192.168.1.47:8008"
+                           value="{{ config.general.get('matrix_homeserver_url', '') }}"
+                           oninput="updateConfigFieldState()">
                     <span class="field-hint">Base URL of your Matrix homeserver (HTTP or HTTPS).</span>
                 </div>
                 <div class="field">
                     <label class="field-label" for="matrix_room_id">Room ID / Alias</label>
                     <input class="field-input" type="text" id="matrix_room_id" placeholder="!alerts:nedara.local or #alerts:nedara.local"
-                           value="{{ config.general.get('matrix_room_id', '') }}">
+                           value="{{ config.general.get('matrix_room_id', '') }}"
+                           oninput="updateConfigFieldState()">
                     <span class="field-hint">Matrix room ID (starting with !) or alias (starting with #).</span>
                 </div>
                 <div class="field">
                     <label class="field-label" for="matrix_access_token">Access Token</label>
-                    <input class="field-input" type="password" id="matrix_access_token" placeholder="syt_..."
-                           value="{{ config.general.get('matrix_access_token', '') }}">
-                    <span class="field-hint">Access token for the Matrix account/bot.</span>
+                    <input class="field-input" type="password" id="matrix_access_token"
+                           placeholder="{% if config.general.get('matrix_access_token') %}•••••••••••• (configured, leave empty to keep){% else %}syt_... or Conduit token{% endif %}"
+                           value=""
+                           oninput="updateConfigFieldState()">
+                    <span class="field-hint">Access token for the Matrix bot account. Leave blank to keep existing.</span>
                 </div>
             </div>
             <div style="margin-top:1.5rem;display:flex;gap:0.75rem;">
@@ -299,57 +420,66 @@
                 </button>
             </div>
         </div>
-    </div>
 
-
-    <!-- ── TAB: EMAIL ── -->
-    <div id="tab-email" class="tab-pane">
-        <div class="admin-card">
+        <!-- ── CARD: EMAIL (SMTP) ── -->
+        <div class="admin-card notif-card" id="card-notif-email">
             <div class="admin-card-header">
-                <i class="fa-solid fa-paper-plane admin-card-icon" aria-hidden="true"></i>
-                <span class="admin-card-title">SMTP server</span>
+                <i class="fa-solid fa-envelope admin-card-icon" aria-hidden="true"></i>
+                <span class="admin-card-title">Email (SMTP)</span>
+                <div class="header-right-chip" id="chip-header-email"></div>
             </div>
-            {% set mail_ready = config.general.get('email_notif_smtp_server') and config.general.get('email_notif_recipients') and config.general.get('alert_channel') in ('email', 'both') %}
-            <div style="margin-bottom: 1.25rem; padding: 0.85rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; {% if mail_ready %}background: var(--ok-soft, rgba(16,185,129,0.1)); border: 1px solid var(--ok-border, rgba(16,185,129,0.25)); color: var(--ok, #059669);{% else %}background: rgba(148,163,184,0.1); border: 1px solid rgba(148,163,184,0.25); color: var(--muted, #64748b);{% endif %}">
-                <i class="fa-solid {% if mail_ready %}fa-circle-check{% else %}fa-circle-pause{% endif %}" style="font-size: 1.15rem;"></i>
-                <div>
-                    <strong style="display:block; font-size: 0.9rem;">Email Alerts: {% if mail_ready %}ACTIVE{% else %}INACTIVE{% endif %}</strong>
-                    <span>{% if mail_ready %}Emails are sent via <code>{{ config.general.get('email_notif_smtp_server') }}</code> to <code>{{ config.general.get('email_notif_recipients') }}</code>.{% else %}Email alerts are inactive (channel set to Telegram only or missing SMTP server / recipients).{% endif %}</span>
-                </div>
-            </div>
+
+            <div class="notif-status-banner" id="banner-email"></div>
+
             <p class="admin-card-note">
-                Leave the server, port and recipients empty to disable email alerts entirely.
-                STARTTLS is used when the server advertises it; login and password may stay empty for an open relay.
+                Configure standard SMTP credentials for email dispatches and recovery notices.
             </p>
             <div class="field-grid">
                 <div class="field">
-                    <label class="field-label" for="email_smtp_server">SMTP server</label>
-                    <input class="field-input" type="text" id="email_smtp_server" placeholder="smtp.example.com"
-                           value="{{ config.general.get('email_notif_smtp_server', '') }}">
+                    <label class="field-label" for="email_smtp_server">SMTP Server</label>
+                    <input class="field-input" type="text" id="email_smtp_server" placeholder="smtp.gmail.com"
+                           value="{{ config.general.get('email_notif_smtp_server', '') }}"
+                           oninput="updateConfigFieldState()">
                 </div>
                 <div class="field">
-                    <label class="field-label" for="email_smtp_port">SMTP port</label>
-                    <input class="field-input" type="number" id="email_smtp_port" min="1" max="65535"
-                           value="{{ config.general.get('email_notif_smtp_port', '587') }}">
+                    <label class="field-label" for="email_smtp_port">SMTP Port</label>
+                    <input class="field-input" type="number" id="email_smtp_port" placeholder="587"
+                           value="{{ config.general.get('email_notif_smtp_port', '587') }}"
+                           oninput="updateConfigFieldState()">
                 </div>
                 <div class="field">
-                    <label class="field-label" for="email_login">Sender address (login)</label>
-                    <input class="field-input" type="email" id="email_login"
-                           value="{{ config.general.get('email_notif_login', '') }}">
+                    <label class="field-label" for="email_login">Sender Address (Login)</label>
+                    <input class="field-input" type="text" id="email_login" placeholder="user@example.com"
+                           value="{{ config.general.get('email_notif_login', '') }}"
+                           oninput="updateConfigFieldState()">
                 </div>
                 <div class="field">
-                    <label class="field-label" for="email_password">SMTP password</label>
-                    <input class="field-input" type="password" id="email_password" placeholder="Leave empty to keep current"
-                           autocomplete="new-password">
-                    <span class="field-hint">Leave blank to keep the existing password.</span>
+                    <label class="field-label" for="email_password">SMTP Password</label>
+                    <input class="field-input" type="password" id="email_password"
+                           placeholder="{% if config.general.get('email_notif_password') %}•••••••••••• (configured, leave empty to keep){% else %}Leave empty for open relay{% endif %}"
+                           value=""
+                           oninput="updateConfigFieldState()">
+                    <span class="field-hint">Leave blank to keep existing password.</span>
                 </div>
-                <div class="field field-wide">
+                <div class="field field-wide" style="grid-column: 1 / -1;">
                     <label class="field-label" for="email_recipients">Recipients (comma-separated)</label>
-                    <input class="field-input" type="text" id="email_recipients" placeholder="a@example.com, b@example.com"
-                           value="{{ config.general.get('email_notif_recipients', '') }}">
+                    <input class="field-input" type="text" id="email_recipients" placeholder="alerts@example.com, admin@example.com"
+                           value="{{ config.general.get('email_notif_recipients', '') }}"
+                           oninput="updateConfigFieldState()">
+                    <span class="field-hint">Addresses receiving alert notifications.</span>
                 </div>
             </div>
+            <div style="margin-top:1.5rem;display:flex;gap:0.75rem;">
+                <button type="button" class="btn btn-primary" onclick="testEmail()" id="btn-test-email">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send test email
+                </button>
+            </div>
         </div>
+
+        <!-- Backward compatibility invisible anchors -->
+        <div id="tab-telegram" style="display:none;"></div>
+        <div id="tab-matrix" style="display:none;"></div>
+        <div id="tab-email" style="display:none;"></div>
     </div>
 
     <!-- ── TAB: ALERTS ── -->
@@ -678,6 +808,201 @@
 <div id="toast"></div>
 
 <script>
+    const serverHasMatrixToken = {{ 'true' if config.general.get('matrix_access_token') else 'false' }};
+    const serverHasEmailPw = {{ 'true' if config.general.get('email_notif_password') else 'false' }};
+
+    function toggleChannelFromTile(channel, event) {
+        if (event.target.tagName === 'INPUT' || event.target.closest('.toggle')) return;
+        const chk = document.getElementById('chk-channel-' + channel);
+        if (chk) {
+            chk.checked = !chk.checked;
+            syncNotificationChannels();
+        }
+    }
+
+    function filterNotifCards(target, btn) {
+        document.querySelectorAll('.notif-subnav-btn').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+
+        const cards = {
+            'telegram': document.getElementById('card-notif-telegram'),
+            'matrix': document.getElementById('card-notif-matrix'),
+            'email': document.getElementById('card-notif-email')
+        };
+
+        if (target === 'all') {
+            Object.values(cards).forEach(c => { if (c) c.style.display = ''; });
+        } else {
+            Object.keys(cards).forEach(k => {
+                if (cards[k]) {
+                    cards[k].style.display = (k === target) ? '' : 'none';
+                }
+            });
+        }
+    }
+
+    function syncNotificationChannels() {
+        const tgChk = document.getElementById('chk-channel-telegram')?.checked;
+        const matChk = document.getElementById('chk-channel-matrix')?.checked;
+        const emailChk = document.getElementById('chk-channel-email')?.checked;
+
+        // Visual tile highlight
+        document.getElementById('tile-channel-telegram')?.classList.toggle('is-enabled', !!tgChk);
+        document.getElementById('tile-channel-matrix')?.classList.toggle('is-enabled', !!matChk);
+        document.getElementById('tile-channel-email')?.classList.toggle('is-enabled', !!emailChk);
+
+        const activeList = [];
+        if (tgChk) activeList.push('telegram');
+        if (matChk) activeList.push('matrix');
+        if (emailChk) activeList.push('email');
+
+        // Canonical value
+        let canonicalVal = 'none';
+        if (activeList.length === 3) canonicalVal = 'all';
+        else if (activeList.length === 2 && tgChk && emailChk) canonicalVal = 'both';
+        else if (activeList.length > 0) canonicalVal = activeList.join(',');
+
+        const alertChanEl = document.getElementById('alert_channel');
+        if (alertChanEl) alertChanEl.value = canonicalVal;
+
+        // Summary text & tab badge
+        const summaryText = document.getElementById('notif-summary-text');
+        const tabBadge = document.getElementById('tab-badge-notif');
+
+        let summaryHtml = '';
+        let badgeText = '';
+
+        if (activeList.length === 0) {
+            summaryHtml = '<strong style="color:var(--crit,#ef4444);">No channels active (Notifications Disabled)</strong>. Check at least one channel above to receive alerts.';
+            badgeText = 'None';
+        } else {
+            const readable = activeList.map(c => {
+                if (c === 'telegram') return 'Telegram';
+                if (c === 'matrix') return 'Matrix';
+                if (c === 'email') return 'Email';
+                return c;
+            }).join(' + ');
+            summaryHtml = `Broadcasting alerts to <strong>${readable}</strong> simultaneously.`;
+            badgeText = readable;
+        }
+
+        if (summaryText) summaryText.innerHTML = summaryHtml;
+        if (tabBadge) tabBadge.textContent = badgeText;
+
+        // Update banners
+        updateAllBanners(tgChk, matChk, emailChk);
+    }
+
+    function updateAllBanners(tgChk, matChk, emailChk) {
+        // 1. Telegram
+        const tgToken = document.getElementById('telegram_bot_token')?.value.trim();
+        const tgChat = document.getElementById('telegram_chat_id')?.value.trim();
+        const tgHasCreds = Boolean(tgToken && tgChat);
+        updateSingleBanner({
+            channel: 'telegram',
+            channelName: 'Telegram',
+            chk: tgChk,
+            hasCreds: tgHasCreds,
+            bannerId: 'banner-tg',
+            badgeId: 'badge-tile-telegram',
+            chipId: 'chip-header-tg',
+            activeDetail: `Dispatched to chat ID <code>${tgChat || 'configured'}</code>.`,
+            pausedDetail: 'Credentials configured, but Telegram toggle is turned OFF above.',
+            incompleteDetail: 'Bot Token or Chat ID is missing.'
+        });
+
+        // 2. Matrix
+        const matHs = document.getElementById('matrix_homeserver_url')?.value.trim();
+        const matRoom = document.getElementById('matrix_room_id')?.value.trim();
+        const matToken = document.getElementById('matrix_access_token')?.value.trim();
+        const matHasCreds = Boolean(matHs && matRoom && (matToken || serverHasMatrixToken));
+        updateSingleBanner({
+            channel: 'matrix',
+            channelName: 'Matrix (Element)',
+            chk: matChk,
+            hasCreds: matHasCreds,
+            bannerId: 'banner-matrix',
+            badgeId: 'badge-tile-matrix',
+            chipId: 'chip-header-matrix',
+            activeDetail: `Dispatched to room <code>${matRoom || 'configured'}</code> via <code>${matHs || 'homeserver'}</code>.`,
+            pausedDetail: 'Credentials saved, but Matrix toggle is turned OFF above.',
+            incompleteDetail: 'Homeserver URL, Room ID, or Access Token missing.'
+        });
+
+        // 3. Email
+        const mailSrv = document.getElementById('email_smtp_server')?.value.trim();
+        const mailRecip = document.getElementById('email_recipients')?.value.trim();
+        const mailHasCreds = Boolean(mailSrv && mailRecip);
+        updateSingleBanner({
+            channel: 'email',
+            channelName: 'Email (SMTP)',
+            chk: emailChk,
+            hasCreds: mailHasCreds,
+            bannerId: 'banner-email',
+            badgeId: 'badge-tile-email',
+            chipId: 'chip-header-email',
+            activeDetail: `Dispatched to <code>${mailRecip || 'recipients'}</code> via SMTP <code>${mailSrv}</code>.`,
+            pausedDetail: 'SMTP settings configured, but Email toggle is turned OFF above.',
+            incompleteDetail: 'SMTP server or recipients missing.'
+        });
+    }
+
+    function updateSingleBanner(opt) {
+        const banner = document.getElementById(opt.bannerId);
+        const badge = document.getElementById(opt.badgeId);
+        const chip = document.getElementById(opt.chipId);
+
+        let stateClass = '';
+        let chipHtml = '';
+        let bannerHtml = '';
+
+        if (opt.chk && opt.hasCreds) {
+            stateClass = 'is-ok';
+            chipHtml = '<span class="chip chip-ok"><i class="fa-solid fa-circle-check"></i> Active</span>';
+            bannerHtml = `
+                <i class="fa-solid fa-circle-check" style="font-size:1.15rem; color:#10b981;"></i>
+                <div>
+                    <strong style="display:block; font-size:0.9rem; color:#059669;">${opt.channelName} Alerts: ACTIVE</strong>
+                    <span>${opt.activeDetail}</span>
+                </div>
+            `;
+        } else if (opt.hasCreds && !opt.chk) {
+            stateClass = 'is-warn';
+            chipHtml = '<span class="chip chip-warn"><i class="fa-solid fa-circle-pause"></i> Paused</span>';
+            bannerHtml = `
+                <i class="fa-solid fa-circle-pause" style="font-size:1.15rem; color:#f59e0b;"></i>
+                <div>
+                    <strong style="display:block; font-size:0.9rem; color:#d97706;">${opt.channelName} Alerts: PAUSED (Disabled in routing)</strong>
+                    <span>${opt.pausedDetail}</span>
+                </div>
+            `;
+        } else {
+            stateClass = 'is-incomplete';
+            chipHtml = '<span class="chip chip-muted"><i class="fa-solid fa-circle-info"></i> Incomplete</span>';
+            bannerHtml = `
+                <i class="fa-solid fa-circle-info" style="font-size:1.15rem; color:#64748b;"></i>
+                <div>
+                    <strong style="display:block; font-size:0.9rem; color:#64748b;">${opt.channelName} Alerts: INCOMPLETE</strong>
+                    <span>${opt.incompleteDetail}</span>
+                </div>
+            `;
+        }
+
+        if (banner) {
+            banner.className = 'notif-status-banner ' + stateClass;
+            banner.innerHTML = bannerHtml;
+        }
+        if (badge) badge.innerHTML = chipHtml;
+        if (chip) chip.innerHTML = chipHtml;
+    }
+
+    function updateConfigFieldState() {
+        const tgChk = document.getElementById('chk-channel-telegram')?.checked;
+        const matChk = document.getElementById('chk-channel-matrix')?.checked;
+        const emailChk = document.getElementById('chk-channel-email')?.checked;
+        updateAllBanners(tgChk, matChk, emailChk);
+    }
+
     async function testTelegram() {
         const btn = document.getElementById('btn-test-tg');
         const token = document.getElementById('telegram_bot_token')?.value.trim();
@@ -745,7 +1070,57 @@
         }
     }
 
+    async function testEmail() {
+        const btn = document.getElementById('btn-test-email');
+        const srv = document.getElementById('email_smtp_server')?.value.trim();
+        const port = document.getElementById('email_smtp_port')?.value.trim();
+        const login = document.getElementById('email_login')?.value.trim();
+        const pw = document.getElementById('email_password')?.value.trim();
+        const recip = document.getElementById('email_recipients')?.value.trim();
+
+        if (!srv || !recip) {
+            showToast('Please provide SMTP Server and Recipients.', 'error');
+            return;
+        }
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending…';
+        try {
+            const resp = await fetch('/admin/test-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email_smtp_server: srv,
+                    email_smtp_port: port,
+                    email_login: login,
+                    email_password: pw,
+                    email_recipients: recip
+                })
+            });
+            const res = await resp.json();
+            if (resp.ok && res.success) {
+                showToast(res.message, 'success');
+            } else {
+                showToast(res.message || 'Failed to send test email.', 'error');
+            }
+        } catch (e) {
+            showToast('Network error: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+
     function showTab(name, btn) {
+        if (['telegram', 'matrix', 'email'].includes(name)) {
+            showTab('notifications', document.getElementById('tab-btn-notifications'));
+            const subBtn = document.querySelector(`.notif-subnav-btn[data-target="${name}"]`);
+            filterNotifCards(name, subBtn);
+            const card = document.getElementById('card-notif-' + name);
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return;
+        }
+
         document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('block'));
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         const pane = document.getElementById('tab-' + name);
@@ -797,6 +1172,8 @@
         document.querySelectorAll('.srv-field').forEach(el => setSrv(el, el.value));
         document.querySelectorAll('.srv-toggle').forEach(el => setSrv(el, el.checked ? '1' : '0'));
 
+        const alertChannel = document.getElementById('alert_channel')?.value || 'telegram';
+
         const payload = {
             general: {
                 display_name: document.getElementById('display_name')?.value || '',
@@ -804,17 +1181,19 @@
                 chart_history: document.getElementById('chart_history')?.value || '5000',
                 chart_adaptive_display: document.getElementById('chart_adaptive_display')?.checked ? '1' : '0',
                 debug: document.getElementById('debug')?.checked ? '1' : '0',
+                alert_channel: alertChannel,
+            },
+            notifications: {
+                alert_channel: alertChannel,
             },
             telegram: {
                 telegram_bot_token: document.getElementById('telegram_bot_token')?.value || '',
                 telegram_chat_id: document.getElementById('telegram_chat_id')?.value || '',
-                alert_channel: document.getElementById('alert_channel')?.value || 'telegram',
             },
             matrix: {
                 matrix_homeserver_url: document.getElementById('matrix_homeserver_url')?.value || '',
                 matrix_room_id: document.getElementById('matrix_room_id')?.value || '',
                 matrix_access_token: document.getElementById('matrix_access_token')?.value || '',
-                alert_channel: document.getElementById('alert_channel')?.value || 'telegram',
             },
             email: {
                 email_notif_smtp_server: document.getElementById('email_smtp_server')?.value || '',
@@ -855,6 +1234,7 @@
                 });
 
                 document.querySelectorAll('.srv-field[data-field="password"]').forEach(el => { el.value = ''; });
+                syncNotificationChannels();
             } else {
                 showToast(data.message || 'Save failed', 'error');
             }
@@ -865,6 +1245,10 @@
             showToast('Network error: ' + err.message, 'error');
         });
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        syncNotificationChannels();
+    });
 </script>
 {% endif %}
 
