@@ -1161,19 +1161,30 @@ def process_alerts(environment, data):
     sustain_seconds = max(_env_float(environment, 'alert_sustain_seconds', 5.0), 0.0)
     clear_seconds = max(_env_float(environment, 'alert_clear_seconds', 15.0), 0.0)
     delay_seconds = max(_get_alert_delay(environment), 0.0) * 60
+    repeat_seconds = max(_get_alert_repeat(environment), 0.0) * 60
     min_severity = SEVERITY_ORDER[_get_alert_min_severity(environment)]
 
     active = []
     for key, alert in raw_alerts.items():
         state = alert_state.get((environment, key))
         if state is None:
+            recent_sent = _mail_state_load(_mail_files(environment)[1]).get(key)
+            is_recent = bool(recent_sent and (now - recent_sent) < repeat_seconds)
             state = {
                 'first_seen': now, 'severity': alert['severity'],
-                'notified': False, 'active': False, 'clear_since': None,
+                'notified': is_recent, 'active': False, 'clear_since': None,
+                'max_notified_severity': alert['severity'] if is_recent else None,
             }
             alert_state[(environment, key)] = state
-        elif SEVERITY_ORDER[alert['severity']] > SEVERITY_ORDER[state['severity']]:
-            # warning → critical: notify again even inside the repeat window
+        elif (
+            SEVERITY_ORDER[alert['severity']] > SEVERITY_ORDER[state['severity']]
+            and (
+                state.get('max_notified_severity') is None
+                or SEVERITY_ORDER[alert['severity']] > SEVERITY_ORDER[state['max_notified_severity']]
+            )
+        ):
+            # warning → critical: notify again even inside the repeat window,
+            # but only if not already notified at this severity or higher during this active issue
             state['escalated'] = True
         state['severity'] = alert['severity']
         state['snapshot'] = alert
@@ -1227,6 +1238,9 @@ def process_alerts(environment, data):
         if state:
             state['notified'] = True
             state['escalated'] = False
+            current_max = state.get('max_notified_severity')
+            if current_max is None or SEVERITY_ORDER[state['severity']] > SEVERITY_ORDER[current_max]:
+                state['max_notified_severity'] = state['severity']
     for alert in active:
         state = alert_state.get((environment, alert['key']))
         alert['notified'] = bool(state and state['notified'])
