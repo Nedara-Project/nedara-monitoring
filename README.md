@@ -61,7 +61,7 @@ Nedara Monitoring is an open-source web application that collects metrics from y
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+ (several pinned dependencies, including `psycopg`, `requests` and `urllib3`, no longer support 3.9 — see [Older system Python](#older-system-python-rhel-9--centos-stream-9))
 - The monitored Linux servers must be reachable over SSH with password or key authentication
 - The PostgreSQL user used for monitoring needs read access to `pg_stat_activity` and `pg_database`
 - The PGBouncer user must be listed in `admin_users` in `pgbouncer.ini`
@@ -87,6 +87,22 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+#### Older system Python (RHEL 9 / CentOS Stream 9)
+
+RHEL 9 and its rebuilds (CentOS Stream 9, Rocky Linux 9, AlmaLinux 9) ship Python 3.9 as the
+system `python3`, which is too old. Install a newer runtime from AppStream — it is installed
+alongside the system Python and does not replace it — and create the virtual environment with it:
+
+```bash
+sudo dnf install python3.12
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+The same applies to any distribution whose default `python3` is older than 3.10. Alternatively,
+the [Docker](#docker) setup needs no Python on the host at all.
 
 ### 3. Configure the application
 
@@ -660,7 +676,7 @@ Set `admin_enabled = 0` (or remove the key). `/admin` will return a `403` immedi
 | Flask | Web framework |
 | Flask-SocketIO | WebSocket layer |
 | Werkzeug | Password hashing for the admin interface |
-| psycopg | PostgreSQL and PGBouncer connections (requires Python 3.9+) |
+| psycopg | PostgreSQL and PGBouncer connections |
 | paramiko | SSH connections to Linux servers |
 | requests | Web application health checks, Telegram Bot API dispatches, and Matrix Client-Server API calls |
 | LightweightCharts (TradingView) | Interactive time-series charts (loaded from CDN) |
@@ -674,8 +690,6 @@ Set `admin_enabled = 0` (or remove the key). `/admin` will return a `403` immedi
 The stylesheets are plain CSS, no build step: `static/css/nedara-base.css` holds the design
 tokens shared by every page, `monitoring.css` the dashboard and `admin.css` the configuration
 panel. Both pages read the same light/dark tokens, so the two interfaces stay visually in sync.
-
-> **Note on psycopg vs psycopg2**: This project uses `psycopg` (v3). If you are running Python < 3.9, switch to `psycopg2` — see [this commit](https://github.com/Nedara-Project/nedara-monitoring/commit/4491f85a1300a228393d9c5fb6f06b50cb7cc16e) for the required changes.
 
 ## License
 
