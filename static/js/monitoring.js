@@ -540,7 +540,8 @@ const Monitoring = Nedara.createWidget({
                         health_class: this.getHealthStatus({
                             cpu: parseFloat(server.cpu_usage) || 0,
                             ram: parseFloat(server.ram_usage_percent) || 0,
-                            storage: Math.max(parseFloat(server.storage_usage_percent) || 0, worstMountPct),
+                            storage: parseFloat(server.storage_usage_percent) || 0,
+                            mount: worstMountPct,
                             load: loadPerCore,
                         }, thr),
                         severity,
@@ -593,14 +594,15 @@ const Monitoring = Nedara.createWidget({
 
                 _.each(server.all_databases, db => allDatabases.add(db));
 
+                const esc = this.escapeHtml;
                 document.querySelector('#postgres-queries tbody').innerHTML =
                     server.active_queries.map(q => `
-                        <tr data-state="${q[2]}" data-db="${q[0]}">
-                            <td>db: ${q[0]}<br>user: ${q[1]}</td>
-                            <td>${q[2]}</td>
-                            <td>${q[5] || 'N/A'}</td>
+                        <tr data-state="${esc(q[2])}" data-db="${esc(q[0])}">
+                            <td>db: ${esc(q[0])}<br>user: ${esc(q[1])}</td>
+                            <td>${esc(q[2])}</td>
+                            <td>${esc(q[5] || 'N/A')}</td>
                             <td>${q[6] >= 0 ? parseFloat(q[6]).toFixed(2) + 's' : '0.00s'}</td>
-                            <td class="truncate" title="${q[3]}">${q[3]}</td>
+                            <td class="truncate" title="${esc(q[3])}">${esc(q[3])}</td>
                         </tr>`).join('');
 
             } else if (server.type === 'pgbouncer') {
@@ -626,17 +628,18 @@ const Monitoring = Nedara.createWidget({
 
                 const pgbTbody = document.querySelector('#pgbouncer-pools tbody');
                 if (pgbTbody && Array.isArray(server.pools)) {
+                    const esc = this.escapeHtml;
                     pgbTbody.innerHTML = server.pools.map(p => {
                         const waiting = parseInt(p.cl_waiting || 0);
                         return `<tr>
-                            <td class="truncate" title="${p.database || ''}">${p.database || '—'}</td>
-                            <td>${p.user || '—'}</td>
-                            <td>${p.cl_active  ?? 0}</td>
+                            <td class="truncate" title="${esc(p.database || '')}">${esc(p.database || '—')}</td>
+                            <td>${esc(p.user || '—')}</td>
+                            <td>${esc(p.cl_active  ?? 0)}</td>
                             <td class="${waiting > 0 ? 'value-high' : ''}">${waiting}</td>
-                            <td>${p.sv_active  ?? 0}</td>
-                            <td>${p.sv_idle    ?? 0}</td>
+                            <td>${esc(p.sv_active  ?? 0)}</td>
+                            <td>${esc(p.sv_idle    ?? 0)}</td>
                             <td>${parseFloat(p.maxwait || 0).toFixed(2)}s</td>
-                            <td>${p.pool_mode  || '—'}</td>
+                            <td>${esc(p.pool_mode  || '—')}</td>
                         </tr>`;
                     }).join('');
                 }
@@ -644,16 +647,17 @@ const Monitoring = Nedara.createWidget({
         });
 
         // Sorted processes
+        const esc = this.escapeHtml;
         allProcesses
             .sort((a, b) => b.cpu !== a.cpu ? b.cpu - a.cpu : b.ram - a.ram)
             .forEach(p => $procTbody.append(`
-                <tr data-server="${p.serverName}">
-                    <td>${p.serverName}</td>
-                    <td>${p.user}</td>
-                    <td>${p.pid}</td>
+                <tr data-server="${esc(p.serverName)}">
+                    <td>${esc(p.serverName)}</td>
+                    <td>${esc(p.user)}</td>
+                    <td>${esc(p.pid)}</td>
                     <td><span class="proc-badge ${this.getProcessStatusClass(p.cpu)}">${p.cpu.toFixed(1)}%</span></td>
                     <td><span class="proc-badge ${this.getProcessStatusClass(p.ram)}">${p.ram.toFixed(1)}%</span></td>
-                    <td class="truncate" title="${p.command}">${p.command}</td>
+                    <td class="truncate" title="${esc(p.command)}">${esc(p.command)}</td>
                 </tr>`));
 
         this.updateDatabaseSelector([...allDatabases].sort());
@@ -737,18 +741,33 @@ const Monitoring = Nedara.createWidget({
         const $lc = $('#modal-log-container');
         if (!$lc.length) return;
 
+        if (prevRaw === newRaw) return;
         const prevLines = prevRaw ? prevRaw.split('\n') : [];
         const newLines  = newRaw  ? newRaw.split('\n')  : [];
 
-        if (newLines.length > prevLines.length) {
+        // The tail is a sliding window: the end of the previous one is the
+        // start of the new one, shifted by the number of appended lines
+        let shift = -1;
+        for (let s = 0; s < prevLines.length; s++) {
+            const kept = prevLines.length - s;
+            if (kept > newLines.length) continue;
+            let same = true;
+            for (let i = 0; i < kept && same; i++) same = prevLines[s + i] === newLines[i];
+            if (same) { shift = s; break; }
+        }
+        const appended = shift >= 0 ? newLines.slice(prevLines.length - shift) : null;
+
+        if (appended) {
             const atBottom = ($lc[0].scrollHeight - $lc[0].scrollTop - $lc[0].clientHeight) < 60;
-            newLines.slice(prevLines.length).forEach(line => {
+            for (let i = 0; i < shift; i++) $lc.children('.log-line').first().remove();
+            appended.forEach(line => {
                 const $l = $(`<div class="log-line log-new">${this.colorizeLogLine(line)}</div>`);
                 $lc.append($l);
                 setTimeout(() => $l.removeClass('log-new'), 800);
             });
             if (atBottom) $lc.scrollTop($lc[0].scrollHeight);
-        } else if (newLines.length < prevLines.length) {
+        } else {
+            // Truncated or rotated: start over
             $lc.html(this.colorizeLogs(newRaw));
             $lc.scrollTop($lc[0].scrollHeight);
         }
@@ -803,6 +822,12 @@ const Monitoring = Nedara.createWidget({
     // ——————————————————————————————————————————
     // ALERTS
     // ——————————————————————————————————————————
+
+    escapeHtml: function (value) {
+        return String(value === undefined || value === null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    },
 
     // Values are injected raw into the templates: keep markup out of them
     sanitize: function (value) {

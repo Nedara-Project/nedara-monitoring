@@ -4,3 +4,4 @@ nedara_monitoring.db
 tmp/
 .venv
 .env
+.secret_key

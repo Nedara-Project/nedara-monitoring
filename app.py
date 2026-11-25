@@ -15,6 +15,8 @@ import urllib3
 import fcntl
 import re
 import fnmatch
+import secrets
+import shlex
 
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -45,18 +47,44 @@ REFRESH_RATE = float(config['general']['refresh_rate'])
 with open('version.json') as _vf:
     VERSION = json.load(_vf)['version']
 
+# Writable directory for the chart history and the mail lock files. Defaults
+# to the application directory; point it to a volume when containerised.
+DATA_DIR = os.environ.get('NEDARA_DATA_DIR') or os.path.dirname(os.path.abspath(__file__))
+
+# Values shipped in the examples: a session signed with them can be forged
+PLACEHOLDER_SECRET_KEYS = {'', 'nedara-change-me', 'your-secret-app-key'}
+
+
+def _get_secret_key():
+    """Configured secret key, or a random one generated once and kept in DATA_DIR."""
+    key = config['general'].get('secret_key', '').strip()
+    if key not in PLACEHOLDER_SECRET_KEYS:
+        return key
+    key_file = os.path.join(DATA_DIR, '.secret_key')
+    try:
+        with open(key_file) as f:
+            key = f.read().strip()
+        if key:
+            return key
+    except FileNotFoundError:
+        pass
+    key = secrets.token_hex(32)
+    with open(os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
+        f.write(key)
+    return key
+
+
 app = Flask(__name__)
 app.json_encoder = CustomJSONEncoder
-app.config['SECRET_KEY'] = config['general'].get('secret_key', 'nedara-change-me')
+app.config['SECRET_KEY'] = _get_secret_key()
+# Keeps the admin session cookie off cross-site POSTs
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*", max_decode_packets=50)
 
 @app.context_processor
 def inject_version():
     return {'version': VERSION}
 
-# Writable directory for the chart history and the mail lock files. Defaults
-# to the application directory; point it to a volume when containerised.
-DATA_DIR = os.environ.get('NEDARA_DATA_DIR') or os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(DATA_DIR, 'nedara_monitoring.db')
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chart_data (
@@ -129,7 +157,7 @@ def _reload_config():
     config.read('config.ini')
     DEFAULT_ENV = config['environments']['default_env']
     REFRESH_RATE = float(config['general']['refresh_rate'])
-    app.config['SECRET_KEY'] = config['general'].get('secret_key', 'nedara-change-me')
+    app.config['SECRET_KEY'] = _get_secret_key()
 
 
 def _is_send_emails_enabled(environment):
@@ -369,12 +397,12 @@ def _alert_mail_block(alert, resolved=False):
     if alert.get('since'):
         rows['Since'] = datetime.fromtimestamp(alert['since']).strftime('%Y-%m-%d %H:%M:%S')
     if alert.get('detail'):
-        rows['Details'] = html.escape(str(alert['detail']))
+        rows['Details'] = alert['detail']
 
     rows_html = ''.join(
         f"""<tr>
               <td style="padding:5px 0;font-size:12px;color:#64748b;font-weight:500;width:110px;vertical-align:top;">{k}</td>
-              <td style="padding:5px 0;font-size:12px;color:#1e293b;vertical-align:top;word-break:break-word;">{v}</td>
+              <td style="padding:5px 0;font-size:12px;color:#1e293b;vertical-align:top;word-break:break-word;">{html.escape(str(v))}</td>
             </tr>"""
         for k, v in rows.items()
     )
@@ -583,9 +611,9 @@ def _build_alert_telegram_message(alerts, environment, resolved=False):
             lines.append("   " + " | ".join(details))
 
         if a.get('detail'):
-            clean_det = html.escape(str(a.get('detail'))).strip()
+            clean_det = str(a.get('detail')).strip()
             if clean_det:
-                lines.append(f"   <code>{clean_det[:250]}</code>")
+                lines.append(f"   <code>{html.escape(clean_det[:250])}</code>")
         lines.append("")
 
     lines.append(f"⏱ <i>{now_str}</i>")
@@ -1513,6 +1541,7 @@ def get_postgres_stats(postgres_config, environment='default'):
     server_type = postgres_config['type']
     server_name = postgres_config['name']
     main_db = postgres_config['database']
+    conn = None
     try:
         postgres_config.pop('type', None)
         postgres_config.pop('name', None)
@@ -1538,7 +1567,7 @@ def get_postgres_stats(postgres_config, environment='default'):
         active_queries = [
             (
                 str(q[0]), str(q[1]), str(q[2]), str(q[3]),
-                str(q[4]), str(q[5]) if q[6] else 'Running', float(q[6]) if q[6] is not None else 0.0
+                str(q[4]), str(q[5]) if q[5] else 'Running', float(q[6]) if q[6] is not None else 0.0
             )
             for q in active_queries
         ]
@@ -1578,11 +1607,14 @@ def get_postgres_stats(postgres_config, environment='default'):
         }
     except Exception as e:
         return {'error': str(e), 'server': 'postgres', 'name': server_name, 'type': 'postgres'}
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def get_server_stats(server_config, environment='default'):
+    ssh = paramiko.SSHClient()
     try:
-        ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
             server_config['host'],
@@ -1618,7 +1650,7 @@ def get_server_stats(server_config, environment='default'):
 
         logs = ""
         if server_config.get('log_file'):
-            stdin, stdout, stderr = ssh.exec_command(f"tail -n 500 {server_config.get('log_file')}")
+            stdin, stdout, stderr = ssh.exec_command(f"tail -n 500 {shlex.quote(server_config['log_file'])}")
             logs = stdout.read().decode().strip()
 
         http_requests = '0'
@@ -1632,7 +1664,7 @@ def get_server_stats(server_config, environment='default'):
                 f"ts = dt[1]\"/\"dt[2]\"/\"dt[3]\":\"dt[4]\":\"dt[5]\":\"dt[6]; "
                 f"if (ts >= start && ts <= end) count++ "
                 f"}} END {{ print count+0 }}' "
-                f"{server_config['nginx_access_file']}"
+                f"{shlex.quote(server_config['nginx_access_file'])}"
             )
             stdin, stdout, stderr = ssh.exec_command(cmd)
             parts = stdout.read().decode().strip().split()
@@ -1739,11 +1771,13 @@ def get_server_stats(server_config, environment='default'):
             'server': server_config['name'],
             'name': server_config['name'],
         }
+    finally:
+        ssh.close()
 
 
 def get_processes_stats(server_config):
+    ssh = paramiko.SSHClient()
     try:
-        ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
             server_config['host'],
@@ -1780,6 +1814,8 @@ def get_processes_stats(server_config):
         }
     except Exception as e:
         return {'error': str(e), 'server': server_config['name']}
+    finally:
+        ssh.close()
 
 
 def check_web_status(environment):
@@ -1803,7 +1839,7 @@ def check_web_status(environment):
     except requests.exceptions.RequestException as e:
         return {
             "status": "Offline",
-            "status_code": 500,
+            "status_code": None,
             "response_time": "N/A",
             "error": str(e),
         }
@@ -2063,7 +2099,10 @@ def handle_get_historical_data(data):
     sid = request.sid
     chart_id = data.get('chart_id')
     series_name = data.get('series_name')
-    max_points = data.get('max_points', 100)
+    try:
+        max_points = min(max(int(data.get('max_points', 100)), 1), 50000)
+    except (TypeError, ValueError):
+        max_points = 100
     environment = client_environments.get(sid, DEFAULT_ENV)
 
     rows = get_chart_data(chart_id, series_name, max_points, environment)
@@ -2186,7 +2225,7 @@ def admin_test_telegram():
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
 
     try:
-        data = request.get_json(force=True) or {}
+        data = request.get_json(silent=True) or {}
         token = data.get('telegram_bot_token', '').strip() or config['general'].get('telegram_bot_token', '').strip()
         chat_id = data.get('telegram_chat_id', '').strip() or config['general'].get('telegram_chat_id', '').strip()
 
@@ -2257,7 +2296,7 @@ def admin_test_matrix():
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
 
     try:
-        data = request.get_json(force=True) or {}
+        data = request.get_json(silent=True) or {}
         hs = data.get('matrix_homeserver_url', '').strip() or config['general'].get('matrix_homeserver_url', '').strip()
         room_id = data.get('matrix_room_id', '').strip() or config['general'].get('matrix_room_id', '').strip()
         token = data.get('matrix_access_token', '').strip() or config['general'].get('matrix_access_token', '').strip()
@@ -2305,7 +2344,7 @@ def admin_test_email():
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
 
     try:
-        data = request.get_json(force=True) or {}
+        data = request.get_json(silent=True) or {}
         server_host = data.get('email_smtp_server', '').strip() or config['general'].get('email_notif_smtp_server', '').strip()
         port_raw = data.get('email_smtp_port', '').strip() or config['general'].get('email_notif_smtp_port', '587').strip()
         login = data.get('email_login', '').strip() or config['general'].get('email_notif_login', '').strip()
@@ -2365,7 +2404,9 @@ def admin_save():
         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
 
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'message': 'Expected a JSON body'}), 400
 
         # General settings
         general_fields = ['display_name', 'refresh_rate', 'chart_history', 'chart_adaptive_display', 'debug', 'alert_channel', 'telegram_bot_token', 'telegram_chat_id', 'matrix_homeserver_url', 'matrix_room_id']
