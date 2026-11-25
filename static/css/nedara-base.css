@@ -3,6 +3,9 @@
    ============================================================ */
 
 :root {
+    /* Native widgets (select popups, scrollbars, date pickers) follow the theme */
+    color-scheme: light;
+
     --bg: #f1f5f9;
     --bg-subtle: #f8fafc;
     --card: #ffffff;
@@ -50,6 +53,8 @@
 }
 
 .dark {
+    color-scheme: dark;
+
     --bg: #060c1a;
     --bg-subtle: rgba(15, 23, 42, 0.5);
     --card: rgba(15, 25, 50, 0.97);
@@ -92,6 +97,14 @@ body {
     background-color: var(--bg);
     min-height: 100vh;
     margin: 0;
+}
+
+/* Select popups: the options do not inherit the (translucent) select
+   background, so give them an opaque one that matches the theme */
+select option,
+select optgroup {
+    background-color: var(--field-bg);
+    color: var(--text);
 }
 
 /* Theme cycle button — present in every top bar */
